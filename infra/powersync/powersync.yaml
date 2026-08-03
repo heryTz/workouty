@@ -1,0 +1,33 @@
+replication:
+  connections:
+    - type: postgresql
+      uri: !env PS_DATA_SOURCE_URI
+      sslmode: disable
+
+# The bucket-storage database is a different database from the source. PowerSync creates
+# and owns a `powersync` schema inside it.
+storage:
+  type: postgresql
+  uri: !env PS_STORAGE_SOURCE_URI
+  sslmode: disable
+
+port: 8080
+
+sync_config:
+  path: /config/sync_rules.yaml
+
+# The API that serves this JWKS endpoint arrives in Milestone 2. Until then no client
+# authenticates, which does not prevent replication from running. See Step 5.
+client_auth:
+  jwks_uri: !env PS_JWKS_URL
+  audience: ['workouty']
+
+system:
+  logging:
+    level: info
+    format: text
+
+# Self-hosted means self-hosted. Off by default this ships metrics to
+# pulse.journeyapps.com.
+telemetry:
+  disable_telemetry_sharing: true

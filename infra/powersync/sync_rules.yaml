@@ -1,0 +1,26 @@
+# Rows are never hard-deleted in Postgres — the server keeps its audit trail. But a
+# soft-deleted row must leave the bucket, so PowerSync emits a REMOVE op and clients drop
+# their local copy. Without `AND deleted_at IS NULL`, a soft-delete is just another PUT and
+# every client accumulates tombstones forever.
+#
+# This mirrors the schema's partial unique indexes, which already treat a soft-deleted row
+# as not-live.
+
+bucket_definitions:
+  # No `parameters` key => a global bucket, synced to every authenticated client.
+  # This is the built-in exercise library (rows where user_id IS NULL).
+  global_exercises:
+    data:
+      - SELECT * FROM exercises WHERE user_id IS NULL AND deleted_at IS NULL
+
+  # `request.user_id()` reads the `sub` claim of the verified JWT.
+  user_data:
+    parameters: SELECT request.user_id() as user_id
+    data:
+      - SELECT * FROM exercises WHERE user_id = bucket.user_id AND deleted_at IS NULL
+      - SELECT * FROM templates WHERE user_id = bucket.user_id AND deleted_at IS NULL
+      - SELECT * FROM template_exercises WHERE user_id = bucket.user_id AND deleted_at IS NULL
+      - SELECT * FROM sessions WHERE user_id = bucket.user_id AND deleted_at IS NULL
+      - SELECT * FROM session_exercises WHERE user_id = bucket.user_id AND deleted_at IS NULL
+      - SELECT * FROM sets WHERE user_id = bucket.user_id AND deleted_at IS NULL
+      - SELECT * FROM exercise_rest_prefs WHERE user_id = bucket.user_id AND deleted_at IS NULL

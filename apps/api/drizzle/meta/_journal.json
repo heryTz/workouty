@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1783610594305,
+      "tag": "0000_previous_senator_kelly",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1785154849036,
+      "tag": "0001_empty_talkback",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1785758886613,
+      "tag": "0002_absent_ink",
+      "breakpoints": true
+    }
+  ]
+}

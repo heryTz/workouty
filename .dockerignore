@@ -1,0 +1,12 @@
+**/node_modules
+**/dist
+.git
+.worktrees
+
+# Never let a developer's local secrets into an image layer.
+**/.env
+**/.env.*
+!**/.env.example
+
+**/.expo
+**/.playwright-mcp

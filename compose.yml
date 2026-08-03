@@ -1,0 +1,101 @@
+name: workouty
+
+services:
+  postgres:
+    image: postgres:18
+    restart: unless-stopped
+    # PowerSync replicates via the logical WAL; the default `replica` level is not enough.
+    command: ["postgres", "-c", "wal_level=logical"]
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    # Loopback only. Nothing off-host needs the database: PowerSync reaches it over the
+    # Compose network, and drizzle-kit/tests connect via localhost.
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  ps-storage:
+    image: postgres:18
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${PS_STORAGE_USER}
+      POSTGRES_PASSWORD: ${PS_STORAGE_PASSWORD}
+      POSTGRES_DB: ${PS_STORAGE_DB}
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - ps_storage_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PS_STORAGE_USER} -d ${PS_STORAGE_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  powersync:
+    image: journeyapps/powersync-service:1.23.3
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ps-storage:
+        condition: service_healthy
+    command: ["start", "-r", "unified"]
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./infra/powersync:/config:ro
+    environment:
+      POWERSYNC_CONFIG_PATH: /config/powersync.yaml
+      NODE_OPTIONS: --max-old-space-size=1000
+      PS_DATA_SOURCE_URI: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      PS_STORAGE_SOURCE_URI: postgresql://${PS_STORAGE_USER}:${PS_STORAGE_PASSWORD}@ps-storage:5432/${PS_STORAGE_DB}
+      PS_JWKS_URL: http://api:3000/.well-known/jwks.json
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:8080/probes/readiness').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  mailpit:
+    image: axllent/mailpit:v1.30.2
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:1025:1025"  # SMTP, reached by the API over the Compose network
+      - "127.0.0.1:8025:8025"  # web inbox, for you
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://localhost:8025 || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY}
+      SMTP_URL: smtp://mailpit:1025
+    ports:
+      - "127.0.0.1:3000:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+volumes:
+  pg_data:
+  ps_storage_data:

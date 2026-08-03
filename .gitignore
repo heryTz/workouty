@@ -1,0 +1,43 @@
+# dependencies
+node_modules
+.pnp
+.pnp.js
+
+# testing
+coverage
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# local env files
+.env*.local
+.env
+# Holds the signing key and both DB passwords; only .env.prod.example belongs in the repo.
+.env.prod
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+
+# database
+*.db-journal
+.turbo
+.out
+
+.playwright-mcp
+.superpowers
+.superpowers/
+
+# git worktrees
+.worktrees/
+
+# build output
+dist/
