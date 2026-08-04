@@ -33,9 +33,6 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # Build first: @workouty/shared and @workouty/emails resolve their types through
-      # dist/index.d.ts, which does not exist on a clean checkout, so typecheck alone fails
-      # with TS2307 on both.
       - name: Build
         run: pnpm build
 
