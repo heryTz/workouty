@@ -2,11 +2,13 @@
   "name": "workouty",
   "private": true,
   "version": "0.0.0",
+  "packageManager": "pnpm@10.34.4",
   "workspaces": [
     "apps/*",
     "packages/*"
   ],
   "scripts": {
+    "build": "pnpm -r build",
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck"
   }

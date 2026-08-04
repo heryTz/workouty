@@ -52,6 +52,7 @@
   "scripts": {
     "postinstall": "powersync-web copy-assets --output public",
     "start": "expo start",
+    "build": "expo export --platform web --output-dir dist",
     "reset-project": "node ./scripts/reset-project.js",
     "android": "expo run:android",
     "ios": "expo run:ios",
