@@ -90,10 +90,12 @@ Repository settings the workflows expect:
 
 - Secrets `DOCKER_USER` and `DOCKER_TOKEN` — a Docker Hub account with push rights to both
   repositories. Without them, only the image jobs fail; the tag and Release still happen.
-- Variables `PUBLIC_API_URL` and `PUBLIC_POWERSYNC_URL` — the URLs **the browser** will use.
-  Expo inlines them into the bundle at build time, so the published web image is
+- Secrets `EXPO_PUBLIC_API_URL` and `EXPO_PUBLIC_POWERSYNC_URL` — the URLs **the browser**
+  will use. Expo inlines them into the bundle at build time, so the published web image is
   origin-specific and cannot be repointed with runtime environment variables. Leave them
   unset and the image is built against `localhost`, which is useful only for local runs.
+  They are not secret in any real sense — they ship in a public JS bundle — so repository
+  *variables* would fit better; secrets only mean Actions masks them in the build log.
 - Allow GitHub Actions to create and approve pull requests (Settings → Actions → General),
   or release-please cannot open its release PR.
 

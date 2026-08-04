@@ -104,8 +104,8 @@ jobs:
             herytz/workouty-web:${{ needs.release-please.outputs.version }}
             herytz/workouty-web:latest
           build-args: |
-            EXPO_PUBLIC_API_URL=${{ vars.PUBLIC_API_URL || 'http://localhost:3000' }}
-            EXPO_PUBLIC_POWERSYNC_URL=${{ vars.PUBLIC_POWERSYNC_URL || 'http://localhost:8080' }}
+            EXPO_PUBLIC_API_URL=${{ secrets.EXPO_PUBLIC_API_URL || 'http://localhost:3000' }}
+            EXPO_PUBLIC_POWERSYNC_URL=${{ secrets.EXPO_PUBLIC_POWERSYNC_URL || 'http://localhost:8080' }}
 
   snapshot:
     name: Publish snapshot images
@@ -153,5 +153,5 @@ jobs:
             herytz/workouty-web:main
             herytz/workouty-web:main-${{ steps.meta.outputs.sha }}
           build-args: |
-            EXPO_PUBLIC_API_URL=${{ vars.PUBLIC_API_URL || 'http://localhost:3000' }}
-            EXPO_PUBLIC_POWERSYNC_URL=${{ vars.PUBLIC_POWERSYNC_URL || 'http://localhost:8080' }}
+            EXPO_PUBLIC_API_URL=${{ secrets.EXPO_PUBLIC_API_URL || 'http://localhost:3000' }}
+            EXPO_PUBLIC_POWERSYNC_URL=${{ secrets.EXPO_PUBLIC_POWERSYNC_URL || 'http://localhost:8080' }}
