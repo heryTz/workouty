@@ -19,6 +19,7 @@ docker compose exec -T postgres psql -U workouty -d workouty < infra/postgres/pu
 docker compose restart powersync
 docker compose exec -T postgres psql -U workouty -d workouty < infra/postgres/seed-exercises.sql
 pnpm test
+pnpm --filter @workouty/api test:int
 ```
 
 This brings up four Compose services, all with healthchecks (`docker compose up -d --wait`
@@ -38,11 +39,11 @@ Two things about this sequence are not obvious and are easy to get wrong:
   the publication when it starts, so after creating/replacing it you must
   `docker compose restart powersync` or it keeps replicating against the old (or absent)
   publication.
-- **`pnpm test` requires the stack to be running.** `apps/api`'s `migrate.test.ts` is an
-  integration test that connects to the real `postgres` container (via `DATABASE_URL` in
-  `.env`), including a check that the `powersync` publication contains exactly the six
-  expected tables. If the stack is down, you'll see a connection-refused error, not a broken
-  test — bring the stack up first.
+- **`test:int` requires the stack to be running, `pnpm test` does not.** The integration
+  suites connect to the real `postgres` and `mailpit` containers (via `DATABASE_URL` and
+  `SMTP_URL` in `.env`) — `migrate.int.test.ts` among them, which checks that the `powersync`
+  publication contains exactly the seven expected tables. If the stack is down you'll see a
+  connection-refused error, not a broken test; bring it up first.
 - **The built-in exercise library is a server seed, not client data.** `infra/postgres/
   seed-exercises.sql` inserts ~20 global exercises (`user_id IS NULL`) that sync to every
   client via the `global_exercises` bucket — the client can never create these itself (the
@@ -50,8 +51,55 @@ Two things about this sequence are not obvious and are easy to get wrong:
   against the partial unique index on `name` where `user_id IS NULL`), so it's safe to re-run;
   run it any time after the publication step.
 
-`@workouty/mobile` has no `test` script, so `pnpm test` (which runs `pnpm -r test` across the
-workspace) silently skips it — that's expected, not a failure.
+### Test layers
+
+Tests are split by what infrastructure they need, because CI runs on a plain runner with no
+Compose stack. A file's suffix decides which layer it belongs to, so a new test lands in the
+right one by name alone:
+
+| Command | Covers | Needs |
+| --- | --- | --- |
+| `pnpm test` (`pnpm -r test`) | everything without a suffix | nothing |
+| `pnpm --filter @workouty/api test:int` | `*.int.test.ts` | `postgres`, `mailpit` |
+| `pnpm --filter @workouty/api test:e2e` | `*.e2e.test.ts` — boots a Nest app | `postgres`, `mailpit` |
+| `pnpm --filter @workouty/mobile test:sync` | `*.node.test.ts` — sync round-trip | the whole stack |
+
+Only the first row runs in CI. The other three are yours to run locally before pushing
+anything that touches the schema, the sync rules, or the upload service — nothing else will
+catch a break in those.
+
+## CI and releases
+
+`.github/workflows/ci.yml` runs typecheck, build, and `pnpm test` on every PR to `main`. The
+build step is not redundant with the tests: vitest never invokes `tsup`, `nest build` or
+`expo export`, so a build that only breaks under the bundler would otherwise reach `main`
+untested.
+
+`.github/workflows/release.yml` runs the same checks on `main`, then hands to
+[release-please](https://github.com/googleapis/release-please), which maintains a release PR
+from the [Conventional Commits](https://www.conventionalcommits.org/) history. Merging that
+PR bumps the version, writes `CHANGELOG.md`, tags, and cuts a GitHub Release; only then do
+the release images build. Every other push to `main` publishes `:main` snapshots instead.
+
+| Image | Release | Snapshot |
+| --- | --- | --- |
+| `herytz/workouty-api` | `:<version>`, `:latest` | `:main`, `:main-<sha>` |
+| `herytz/workouty-web` | `:<version>`, `:latest` | `:main`, `:main-<sha>` |
+
+Repository settings the workflows expect:
+
+- Secrets `DOCKER_USER` and `DOCKER_TOKEN` — a Docker Hub account with push rights to both
+  repositories. Without them, only the image jobs fail; the tag and Release still happen.
+- Variables `PUBLIC_API_URL` and `PUBLIC_POWERSYNC_URL` — the URLs **the browser** will use.
+  Expo inlines them into the bundle at build time, so the published web image is
+  origin-specific and cannot be repointed with runtime environment variables. Leave them
+  unset and the image is built against `localhost`, which is useful only for local runs.
+- Allow GitHub Actions to create and approve pull requests (Settings → Actions → General),
+  or release-please cannot open its release PR.
+
+Because release-please derives the changelog from commit messages, a commit that isn't
+`feat:`, `fix:`, or another conventional type contributes nothing to a release. Nothing
+enforces this locally yet — walletko does it with husky + commitlint.
 
 ## Production stack
 

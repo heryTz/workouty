@@ -1,0 +1,181 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Never cancel: a cancelled run can abort a release mid-flight. Queue instead.
+  cancel-in-progress: false
+
+jobs:
+  # Duplicated from ci.yml on purpose. ci.yml tests the PR's merge result; this tests what
+  # actually landed on main, and is what gates the tag below. Keep the two step lists in
+  # sync — if you add a step here, add it there too.
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Install Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Build
+        run: pnpm build
+
+      - name: Run tests
+        run: pnpm test
+
+  release-please:
+    name: Release PR
+    runs-on: ubuntu-latest
+    # needs: [test] is load-bearing, not sequencing preference. release-please tags and cuts
+    # the Release itself; anything that runs after it cannot stop a release, only strand one
+    # (tag + Release exist, no image, :latest stale).
+    needs: [test]
+    permissions:
+      contents: write
+      # issues: write is NOT unused. release-please labels its release PR (autorelease:
+      # pending) to find it again on later runs, and PR labels go through the issues API.
+      # Removing it makes releases silently stop.
+      issues: write
+      pull-requests: write
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      version: ${{ steps.release.outputs.version }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - name: Release please
+        id: release
+        uses: googleapis/release-please-action@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  publish:
+    name: Publish release images
+    runs-on: ubuntu-latest
+    needs: [release-please]
+    # result == 'success' guards the case where test failed, which skips release-please. Do
+    # not reduce this to the release_created check alone: a skipped job leaves
+    # release_created empty, and '' != 'true' is true.
+    if: needs.release-please.result == 'success' && needs.release-please.outputs.release_created == 'true'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+          # Check out the tag, not github.sha. With cancel-in-progress: false, GitHub cancels
+          # a pending run when a newer one queues; the surviving run's HEAD can then be a
+          # later commit than the one being released.
+          ref: ${{ needs.release-please.outputs.tag_name }}
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USER }}
+          password: ${{ secrets.DOCKER_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # context: . is load-bearing for both images. The Dockerfiles copy the root lockfile
+      # and the workspace packages the app links to, not just apps/<app>.
+      - name: Build and push api
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          target: runtime
+          push: true
+          tags: |
+            herytz/workouty-api:${{ needs.release-please.outputs.version }}
+            herytz/workouty-api:latest
+
+      # Expo inlines EXPO_PUBLIC_* into the JS bundle, so this image is origin-specific: it
+      # talks to whatever was compiled in, whatever env a container is started with. Set the
+      # PUBLIC_API_URL / PUBLIC_POWERSYNC_URL repository variables to the URLs the browser
+      # will use, or the published image only works against a stack on localhost.
+      - name: Build and push web
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/mobile/Dockerfile
+          target: runtime
+          push: true
+          tags: |
+            herytz/workouty-web:${{ needs.release-please.outputs.version }}
+            herytz/workouty-web:latest
+          build-args: |
+            EXPO_PUBLIC_API_URL=${{ vars.PUBLIC_API_URL || 'http://localhost:3000' }}
+            EXPO_PUBLIC_POWERSYNC_URL=${{ vars.PUBLIC_POWERSYNC_URL || 'http://localhost:8080' }}
+
+  snapshot:
+    name: Publish snapshot images
+    runs-on: ubuntu-latest
+    needs: [release-please]
+    # See publish's guard above — same reasoning: without result == 'success', a failed test
+    # job would let this push :main from a red commit.
+    if: needs.release-please.result == 'success' && needs.release-please.outputs.release_created != 'true'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      - name: Resolve short sha
+        id: meta
+        run: echo "sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USER }}
+          password: ${{ secrets.DOCKER_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push api snapshot
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          target: runtime
+          push: true
+          tags: |
+            herytz/workouty-api:main
+            herytz/workouty-api:main-${{ steps.meta.outputs.sha }}
+
+      - name: Build and push web snapshot
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/mobile/Dockerfile
+          target: runtime
+          push: true
+          tags: |
+            herytz/workouty-web:main
+            herytz/workouty-web:main-${{ steps.meta.outputs.sha }}
+          build-args: |
+            EXPO_PUBLIC_API_URL=${{ vars.PUBLIC_API_URL || 'http://localhost:3000' }}
+            EXPO_PUBLIC_POWERSYNC_URL=${{ vars.PUBLIC_POWERSYNC_URL || 'http://localhost:8080' }}

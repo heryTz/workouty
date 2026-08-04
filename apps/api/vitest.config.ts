@@ -7,7 +7,9 @@ config({ path: fileURLToPath(new URL('../../.env', import.meta.url)), quiet: tru
 export default defineConfig({
   test: {
     environment: 'node',
-    // Unit + integration tests, but NOT e2e (which boots a Nest app). test:e2e owns those.
-    exclude: ['**/node_modules/**', '**/dist/**', '**/*.e2e.test.ts'],
+    // Unit tests only — no Compose stack, no Postgres, no SMTP, which is what lets CI run this
+    // on a PR without booting anything. `*.int.test.ts` hits the real database and Mailpit,
+    // `*.e2e.test.ts` boots a Nest app on top of both; test:int and test:e2e own those.
+    exclude: ['**/node_modules/**', '**/dist/**', '**/*.int.test.ts', '**/*.e2e.test.ts'],
   },
 })
