@@ -2,7 +2,7 @@
 //
 // "Visible" exercises: the local PowerSync SQLite mirror only ever contains rows this device is
 // allowed to see — the built-in library via the `global_exercises` bucket (user_id IS NULL) and
-// this user's own rows via `user_data` (see infra/powersync/sync_rules.yaml). So a plain
+// this user's own rows via `user_data` (see apps/powersync/sync_rules.yaml). So a plain
 // `SELECT * FROM exercises` needs no explicit user_id filter to stay scoped correctly: every
 // locally-visible row already belongs to either nobody (built-in) or the signed-in user.
 //

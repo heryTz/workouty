@@ -11,4 +11,9 @@ set -e
 # migration step before scaling out.
 node /app/dist/migrate.mjs
 
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
+  -f /app/sql/publication.sql \
+  -f /app/sql/powersync-role.sql \
+  -f /app/sql/seed-exercises.sql
+
 exec "$@"

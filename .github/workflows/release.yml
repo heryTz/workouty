@@ -107,6 +107,17 @@ jobs:
             EXPO_PUBLIC_API_URL=${{ secrets.EXPO_PUBLIC_API_URL || 'http://localhost:6100' }}
             EXPO_PUBLIC_POWERSYNC_URL=${{ secrets.EXPO_PUBLIC_POWERSYNC_URL || 'http://localhost:6101' }}
 
+      - name: Build and push powersync
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/powersync/Dockerfile
+          target: runtime
+          push: true
+          tags: |
+            herytz/workouty-powersync:${{ needs.release-please.outputs.version }}
+            herytz/workouty-powersync:latest
+
   snapshot:
     name: Publish snapshot images
     runs-on: ubuntu-latest
@@ -155,3 +166,14 @@ jobs:
           build-args: |
             EXPO_PUBLIC_API_URL=${{ secrets.EXPO_PUBLIC_API_URL || 'http://localhost:6100' }}
             EXPO_PUBLIC_POWERSYNC_URL=${{ secrets.EXPO_PUBLIC_POWERSYNC_URL || 'http://localhost:6101' }}
+
+      - name: Build and push powersync snapshot
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/powersync/Dockerfile
+          target: runtime
+          push: true
+          tags: |
+            herytz/workouty-powersync:main
+            herytz/workouty-powersync:main-${{ steps.meta.outputs.sha }}

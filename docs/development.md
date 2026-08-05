@@ -19,15 +19,17 @@ pnpm --filter @workouty/api test:int
 ```
 
 That is the whole sequence, from an empty machine or after `docker compose down -v`. The
-stack bootstraps itself in dependency order: `api` applies drizzle migrations from its
-entrypoint before serving, `db-bootstrap` then creates the publication, grants `powersync_role`,
-and seeds the exercise library, and `powersync` waits for it to exit successfully.
+stack bootstraps itself in dependency order, and all of it happens inside the `api` container's
+entrypoint (`apps/api/docker-entrypoint.sh`): drizzle migrations first, then the publication,
+the `powersync_role` grants, and the exercise-library seed, and only then does the server start
+listening. `powersync` waits on `api` reporting healthy, which by construction means every one
+of those steps already succeeded.
 
-`--build` matters on the first run and after any change under `apps/api`: Compose reuses a
-cached `workouty-api` image otherwise, and a stale one that predates the migrating entrypoint
-brings the stack up against an empty schema, which fails `db-bootstrap` rather than the API.
+`--build` matters on the first run and after any change under `apps/api` or `apps/powersync`:
+Compose reuses cached images otherwise, and nothing in this stack is bind-mounted from the
+working tree any more — the bootstrap SQL and the sync rules are both baked into images.
 
-This brings up five long-running Compose services plus one one-shot, all with healthchecks
+This brings up five long-running Compose services, all with healthchecks
 (`docker compose up -d --wait` blocks until every one of them reports healthy):
 
 - `db` — the app's source of truth (127.0.0.1:6103), running with `wal_level=logical`
@@ -35,27 +37,32 @@ This brings up five long-running Compose services plus one one-shot, all with he
 - `ps-storage` — PowerSync's own bucket storage database (127.0.0.1:6104). Unrelated to the
   app schema; PowerSync manages its own `powersync` schema here.
 - `powersync` — the self-hosted PowerSync sync service (0.0.0.0:6101).
-- `api` — the NestJS backend (127.0.0.1:6100), which migrates the schema on startup.
+- `api` — the NestJS backend (127.0.0.1:6100), which migrates and bootstraps the schema on
+  startup.
 - `mailpit` — a local SMTP sink for outgoing email. Web inbox at http://localhost:6106.
-- `db-bootstrap` — one-shot; applies `infra/postgres/*.sql` and exits.
 
 Some things about this stack are not obvious and are easy to get wrong:
 
-- **Editing anything under `infra/postgres/` means re-running `db-bootstrap`.** All three
-  scripts are idempotent, so `docker compose up -d db-bootstrap` re-applies them. PowerSync
-  reads the publication only at startup, so follow a publication change with
-  `docker compose restart powersync` or it keeps replicating against the old one.
-- **Ordering inside `db-bootstrap` is load-bearing.** `publication.sql` names specific tables,
-  so migrations must have run — hence the wait on `api`. `powersync-role.sql` then grants
-  `powersync_role` SELECT on whatever the publication ended up containing, so it comes second.
-  That role holds SELECT on exactly the published tables and nothing else: `users` and the
-  token tables stay unreadable to it, which is the point.
+- **Editing anything under `apps/api/sql/` or `apps/powersync/` means rebuilding that image.**
+  Both ship their config inside the image, so `docker compose up -d --build` is how you
+  re-apply. The three SQL scripts are idempotent and re-run on every API start. PowerSync reads
+  the publication only at startup, so follow a publication change with
+  `docker compose restart powersync` too, or it keeps replicating against the old one.
+  A sync-rules edit rebuilds in ~1s; an SQL edit costs a full API recompile (~40s), because
+  `apps/api/sql/` sits inside the build stage's `COPY apps/api apps/api`. That is rarely a real
+  cost — `apps/api/drizzle/` is inside the same COPY, so any schema change already pays it, and
+  `publication.sql` edits almost always accompany a migration.
+- **Ordering inside the entrypoint is load-bearing.** `publication.sql` names specific tables,
+  so the migrations must run first. `powersync-role.sql` then grants `powersync_role` SELECT on
+  whatever the publication ended up containing, so it comes second. That role holds SELECT on
+  exactly the published tables and nothing else: `users` and the token tables stay unreadable
+  to it, which is the point.
 - **`test:int` requires the stack to be running, `pnpm test` does not.** The integration
   suites connect to the real `db` and `mailpit` containers (via `DATABASE_URL` and
   `SMTP_URL` in `.env`) — `migrate.int.test.ts` among them, which checks that the `powersync`
   publication contains exactly the seven expected tables. If the stack is down you'll see a
   connection-refused error, not a broken test; bring it up first.
-- **The built-in exercise library is a server seed, not client data.** `infra/postgres/
+- **The built-in exercise library is a server seed, not client data.** `apps/api/sql/
   seed-exercises.sql` inserts ~20 global exercises (`user_id IS NULL`) that sync to every
   client via the `global_exercises` bucket — the client can never create these itself (the
   upload service forces `user_id` from the JWT). The seed is idempotent (`ON CONFLICT`
@@ -95,10 +102,15 @@ the release images build. Every other push to `main` publishes `:main` snapshots
 | --- | --- | --- |
 | `herytz/workouty-api` | `:<version>`, `:latest` | `:main`, `:main-<sha>` |
 | `herytz/workouty-web` | `:<version>`, `:latest` | `:main`, `:main-<sha>` |
+| `herytz/workouty-powersync` | `:<version>`, `:latest` | `:main`, `:main-<sha>` |
+
+`workouty-powersync` is `journeyapps/powersync-service` plus this repo's `powersync.yaml` and
+`sync_rules.yaml` — see [Why nothing is mounted](#why-nothing-is-mounted). All three tags move
+together, so `IMAGE_TAG` selects a matching set.
 
 Repository settings the workflows expect:
 
-- Secrets `DOCKER_USER` and `DOCKER_TOKEN` — a Docker Hub account with push rights to both
+- Secrets `DOCKER_USER` and `DOCKER_TOKEN` — a Docker Hub account with push rights to all three
   repositories. Without them, only the image jobs fail; the tag and Release still happen.
 - Secrets `EXPO_PUBLIC_API_URL` and `EXPO_PUBLIC_POWERSYNC_URL` — the URLs **the browser**
   will use. Expo inlines them into the bundle at build time, so the published web image is
@@ -123,21 +135,51 @@ cp .env.prod.example .env.prod        # then fill in JWT_PRIVATE_KEY and the pas
 docker compose --env-file .env.prod -f compose.prod.yml up -d --pull always --wait
 ```
 
-Nothing is built here: `api` and `web` are pulled from Docker Hub at `IMAGE_TAG`, which
-defaults to `latest`. Pin it to a released version for a real deployment, and redeploy by
-changing it rather than by re-pulling a moving tag. The repo is still needed on the host —
-`db-bootstrap` and `powersync` bind-mount their config out of `infra/`.
+Nothing is built here, and nothing is mounted: `api`, `web`, and `powersync` are all pulled
+from Docker Hub at `IMAGE_TAG`, which defaults to `latest`. Pin it to a released version for a
+real deployment, and redeploy by changing it rather than by re-pulling a moving tag.
+`compose.prod.yml` and a filled-in `.env.prod` are the only two files the host needs — no
+repo checkout.
 
 That's the entire setup, and it bootstraps the same way the dev stack does. The API applies
-drizzle migrations from its own entrypoint (`apps/api/docker-entrypoint.sh`) before the server
-starts, so a container can never serve traffic against a schema it wasn't built for.
-`db-bootstrap` then applies the PowerSync publication, the `powersync_role` grants, and the
-global exercise seed, and `powersync` is gated on it completing. `--wait` returns once every
-long-running service reports healthy.
+the drizzle migrations, the PowerSync publication, the `powersync_role` grants, and the global
+exercise seed from its own entrypoint (`apps/api/docker-entrypoint.sh`) before the server
+starts, so a container can never serve traffic against a schema it wasn't built for — and
+`powersync`, gated on that healthcheck, can never replicate against a publication that doesn't
+exist yet. `--wait` returns once every service reports healthy.
 
-`db-bootstrap` re-runs on every `up`, which is also how you rotate the replication password:
+The bootstrap re-runs on every start, which is also how you rotate the replication password:
 change `PS_REPLICATION_PASSWORD` in `.env.prod` and redeploy. Both halves move together —
 the role's password and the URI PowerSync dials with come from the same variable.
+
+### Why nothing is mounted
+
+Both directories that used to be bind-mounted out of `infra/` held files whose correct contents
+depend on the code version rather than on the deployment, which is what makes them code and not
+config:
+
+- `apps/api/sql/publication.sql` names tables a matching migration must already have created.
+  A host checkout that drifted from `IMAGE_TAG` would fail outright — or worse, quietly publish
+  the wrong set of tables.
+- `apps/powersync/sync_rules.yaml` is a query definition against the same schema, down to the
+  `user_id` and `deleted_at` columns. Drift here is the more dangerous of the two: it syncs the
+  wrong columns while every health probe stays green.
+
+Real per-deployment values live in `.env.prod` instead. `apps/powersync/powersync.yaml` holds
+none of them — every varying value is `!env PS_*`, substituted at startup, so the image is
+identical across environments. If you ever need a structurally different config (a second
+replication connection, say), set `POWERSYNC_CONFIG_B64` to a base64-encoded config; it takes
+precedence over the bundled file, no rebuild needed.
+
+Note that `!env` has **no default-value syntax** — an undefined variable is a hard startup
+error, not a fallback. Both compose files therefore supply every substituted variable, using
+`${VAR:-default}` for the ones that have a sane default (`PS_DATA_SOURCE_SSLMODE`,
+`PS_STORAGE_SOURCE_SSLMODE`, `PS_LOG_LEVEL`). Adding an `!env` to `powersync.yaml` means
+adding it to both compose files in the same commit, or the service refuses to boot.
+
+`sslmode` defaults to `disable` because both databases are siblings on a private Compose
+network. **Point either URI at a managed Postgres and it must become `verify-full`** — that is
+the whole reason it is a variable rather than a hardcoded line.
 
 The migration entrypoint assumes a **single API instance**. Several replicas would race;
 drizzle wraps each migration in a transaction so the loser exits rather than corrupting
@@ -210,5 +252,6 @@ directly, so a Compose hostname like `http://api:3000` would never resolve.
 - TLS is not handled in the stack. Caddy serves plain HTTP on :80 on the assumption that
   something in front terminates TLS; if you'd rather Caddy do ACME itself, give it a real
   hostname in `apps/mobile/Caddyfile`.
-- The API image is 359 MB, nearly all of it the `node:22-alpine` base. Trimming further
-  means a distroless or single-binary runtime, which is a bigger change than it sounds.
+- The API image is 367 MB, nearly all of it the `node:22-alpine` base. Trimming further
+  means a distroless or single-binary runtime, which is a bigger change than it sounds — and
+  would have to keep `psql`, which the bootstrap entrypoint needs.

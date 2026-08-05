@@ -14,7 +14,7 @@ import { baseColumns } from './columns'
 
 /**
  * Never published to the replication stream, and never synced to clients.
- * See infra/postgres/publication.sql.
+ * See apps/api/sql/publication.sql.
  */
 export const users = pgTable(
   'users',
@@ -190,7 +190,7 @@ export const exerciseRestPrefs = pgTable(
 
 /**
  * Never published to the replication stream: holds token hashes.
- * See infra/postgres/publication.sql.
+ * See apps/api/sql/publication.sql.
  */
 export const refreshTokens = pgTable(
   'refresh_tokens',
@@ -208,7 +208,7 @@ export const refreshTokens = pgTable(
 
 /**
  * Never published to the replication stream: holds token hashes.
- * See infra/postgres/publication.sql.
+ * See apps/api/sql/publication.sql.
  */
 export const passwordResetTokens = pgTable(
   'password_reset_tokens',

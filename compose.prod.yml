@@ -33,48 +33,31 @@ services:
       timeout: 5s
       retries: 5
 
-  # Waits on `api` because the API applies migrations from its entrypoint, and publication.sql
-  # names tables that must already exist. powersync-role.sql then grants SELECT on whatever the
-  # publication ended up containing, so it has to come second. All three scripts are idempotent.
-  db-bootstrap:
-    image: postgres:18
-    restart: "no"
-    depends_on:
-      api:
-        condition: service_healthy
-    environment:
-      PGHOST: db
-      PGUSER: ${POSTGRES_USER}
-      PGPASSWORD: ${POSTGRES_PASSWORD}
-      PGDATABASE: ${POSTGRES_DB}
-      PS_REPLICATION_USER: ${PS_REPLICATION_USER:?set PS_REPLICATION_USER in your env file}
-      PS_REPLICATION_PASSWORD: ${PS_REPLICATION_PASSWORD:?set PS_REPLICATION_PASSWORD in your env file}
-    volumes:
-      - ./infra/postgres:/sql:ro
-    entrypoint: ["psql", "-v", "ON_ERROR_STOP=1", "-f", "/sql/publication.sql", "-f", "/sql/powersync-role.sql", "-f", "/sql/seed-exercises.sql"]
-
   powersync:
-    image: journeyapps/powersync-service:1.23.3
+    image: herytz/workouty-powersync:${IMAGE_TAG:-latest}
     restart: unless-stopped
     depends_on:
       ps-storage:
         condition: service_healthy
-      # PowerSync reads the publication once, at startup. Booting before db-bootstrap means
-      # replicating against a publication that does not exist yet, until manually restarted.
-      db-bootstrap:
-        condition: service_completed_successfully
+      # PowerSync reads the publication once, at startup, so booting before it exists means
+      # replicating against nothing until manually restarted. `api` only reports healthy after
+      # its entrypoint has applied the migrations and its bundled apps/api/sql/*.sql.
       api:
         condition: service_healthy
     command: ["start", "-r", "unified"]
     ports:
       - "${POWERSYNC_PORT:-6101}:8080"
-    volumes:
-      - ./infra/powersync:/config:ro
     environment:
       POWERSYNC_CONFIG_PATH: /config/powersync.yaml
       NODE_OPTIONS: --max-old-space-size=1000
       PS_DATA_SOURCE_URI: postgresql://${PS_REPLICATION_USER}:${PS_REPLICATION_PASSWORD}@db:5432/${POSTGRES_DB}
       PS_STORAGE_SOURCE_URI: postgresql://${PS_STORAGE_USER}:${PS_STORAGE_PASSWORD}@ps-storage:5432/${PS_STORAGE_DB}
+      # Both databases are siblings on this private network, so `disable` is the default. Point
+      # either URI at a managed Postgres and this must become verify-full. `!env` has no default
+      # syntax, so every substituted variable must be supplied or the service refuses to start.
+      PS_DATA_SOURCE_SSLMODE: ${PS_DATA_SOURCE_SSLMODE:-disable}
+      PS_STORAGE_SOURCE_SSLMODE: ${PS_STORAGE_SOURCE_SSLMODE:-disable}
+      PS_LOG_LEVEL: ${PS_LOG_LEVEL:-info}
       PS_JWKS_URL: http://api:3000/.well-known/jwks.json
       # Unset would resolve to an empty string, and `tokens: ['']` opens the admin API to a
       # bearer token of "".
@@ -98,6 +81,10 @@ services:
       # Unset would mean "allow all" — the dev default.
       CORS_ORIGINS: ${PUBLIC_WEB_URL:?set PUBLIC_WEB_URL in your env file}
       APP_WEB_URL: ${PUBLIC_WEB_URL}
+      # Read by the image's bundled powersync-role.sql, which the entrypoint runs after
+      # migrating. Unset would create a role named "" and abort startup.
+      PS_REPLICATION_USER: ${PS_REPLICATION_USER:?set PS_REPLICATION_USER in your env file}
+      PS_REPLICATION_PASSWORD: ${PS_REPLICATION_PASSWORD:?set PS_REPLICATION_PASSWORD in your env file}
     ports:
       - "${API_PORT:-6100}:3000"
     healthcheck:
