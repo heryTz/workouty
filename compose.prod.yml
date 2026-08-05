@@ -99,7 +99,7 @@ services:
       SMTP_URL: ${SMTP_URL:?set SMTP_URL to your mail relay — this stack has no built-in one}
       # Unset would mean "allow all" — the dev default.
       CORS_ORIGINS: ${PUBLIC_WEB_URL:?set PUBLIC_WEB_URL in your env file}
-      APP_RESET_URL_BASE: ${PUBLIC_WEB_URL}/reset
+      APP_WEB_URL: ${PUBLIC_WEB_URL}
     ports:
       - "${API_PORT:-6100}:3000"
     healthcheck:
