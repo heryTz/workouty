@@ -16,13 +16,13 @@ import { createConnector, type WorkoutyConnector } from './connector'
 import { createDatabase } from './database'
 import { SecureTokenStore, type TokenStore } from './token-store'
 
-// Dev defaults mirror compose.yml's published ports (api :3000, powersync :8080) — see
+// Dev defaults mirror compose.yml's published ports (api :6100, powersync :6101) — see
 // apps/mobile/AGENTS.md-adjacent .env.example. `localhost` only resolves to the dev machine
 // itself: a physical device (or emulator, depending on platform) needs the dev machine's LAN
 // IP instead. Override via EXPO_PUBLIC_API_URL / EXPO_PUBLIC_POWERSYNC_URL in apps/mobile/.env
 // (EXPO_PUBLIC_* vars are inlined into the JS bundle at build time by Expo).
-const DEFAULT_API_URL = 'http://localhost:3000'
-const DEFAULT_POWERSYNC_URL = 'http://localhost:8080'
+const DEFAULT_API_URL = 'http://localhost:6100'
+const DEFAULT_POWERSYNC_URL = 'http://localhost:6101'
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL ?? DEFAULT_API_URL
 const POWERSYNC_URL = process.env.EXPO_PUBLIC_POWERSYNC_URL ?? DEFAULT_POWERSYNC_URL

@@ -8,7 +8,7 @@
 // internally (see ../powersync/connector.ts's private refresh()) against the same
 // /auth/refresh endpoint.
 
-const DEFAULT_API_URL = 'http://localhost:3000'
+const DEFAULT_API_URL = 'http://localhost:6100'
 const API_URL = process.env.EXPO_PUBLIC_API_URL ?? DEFAULT_API_URL
 
 // .bind(globalThis) — NOT a bare `fetch` reference — required for web: a browser's `fetch` is
