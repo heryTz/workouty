@@ -13,34 +13,45 @@
 ```bash
 pnpm install
 cp .env.example .env
-docker compose up -d --wait
-pnpm --filter @workouty/api db:migrate
-docker compose exec -T postgres psql -U workouty -d workouty < infra/postgres/publication.sql
-docker compose restart powersync
-docker compose exec -T postgres psql -U workouty -d workouty < infra/postgres/seed-exercises.sql
+docker compose up -d --wait --build
 pnpm test
 pnpm --filter @workouty/api test:int
 ```
 
-This brings up four Compose services, all with healthchecks (`docker compose up -d --wait`
-blocks until every one of them reports healthy):
+That is the whole sequence, from an empty machine or after `docker compose down -v`. The
+stack bootstraps itself in dependency order: `api` applies drizzle migrations from its
+entrypoint before serving, `db-bootstrap` then creates the publication, grants `powersync_role`,
+and seeds the exercise library, and `powersync` waits for it to exit successfully.
 
-- `postgres` — the app's source of truth (127.0.0.1:6103), running with `wal_level=logical`
+`--build` matters on the first run and after any change under `apps/api`: Compose reuses a
+cached `workouty-api` image otherwise, and a stale one that predates the migrating entrypoint
+brings the stack up against an empty schema, which fails `db-bootstrap` rather than the API.
+
+This brings up five long-running Compose services plus one one-shot, all with healthchecks
+(`docker compose up -d --wait` blocks until every one of them reports healthy):
+
+- `db` — the app's source of truth (127.0.0.1:6103), running with `wal_level=logical`
   so PowerSync can replicate from it.
 - `ps-storage` — PowerSync's own bucket storage database (127.0.0.1:6104). Unrelated to the
   app schema; PowerSync manages its own `powersync` schema here.
 - `powersync` — the self-hosted PowerSync sync service (0.0.0.0:6101).
+- `api` — the NestJS backend (127.0.0.1:6100), which migrates the schema on startup.
 - `mailpit` — a local SMTP sink for outgoing email. Web inbox at http://localhost:6106.
+- `db-bootstrap` — one-shot; applies `infra/postgres/*.sql` and exits.
 
-Two things about this sequence are not obvious and are easy to get wrong:
+Some things about this stack are not obvious and are easy to get wrong:
 
-- **Ordering matters.** The publication (`infra/postgres/publication.sql`) names specific
-  tables, so those tables must already exist — run `db:migrate` first. PowerSync only reads
-  the publication when it starts, so after creating/replacing it you must
-  `docker compose restart powersync` or it keeps replicating against the old (or absent)
-  publication.
+- **Editing anything under `infra/postgres/` means re-running `db-bootstrap`.** All three
+  scripts are idempotent, so `docker compose up -d db-bootstrap` re-applies them. PowerSync
+  reads the publication only at startup, so follow a publication change with
+  `docker compose restart powersync` or it keeps replicating against the old one.
+- **Ordering inside `db-bootstrap` is load-bearing.** `publication.sql` names specific tables,
+  so migrations must have run — hence the wait on `api`. `powersync-role.sql` then grants
+  `powersync_role` SELECT on whatever the publication ended up containing, so it comes second.
+  That role holds SELECT on exactly the published tables and nothing else: `users` and the
+  token tables stay unreadable to it, which is the point.
 - **`test:int` requires the stack to be running, `pnpm test` does not.** The integration
-  suites connect to the real `postgres` and `mailpit` containers (via `DATABASE_URL` and
+  suites connect to the real `db` and `mailpit` containers (via `DATABASE_URL` and
   `SMTP_URL` in `.env`) — `migrate.int.test.ts` among them, which checks that the `powersync`
   publication contains exactly the seven expected tables. If the stack is down you'll see a
   connection-refused error, not a broken test; bring it up first.
@@ -48,8 +59,7 @@ Two things about this sequence are not obvious and are easy to get wrong:
   seed-exercises.sql` inserts ~20 global exercises (`user_id IS NULL`) that sync to every
   client via the `global_exercises` bucket — the client can never create these itself (the
   upload service forces `user_id` from the JWT). The seed is idempotent (`ON CONFLICT`
-  against the partial unique index on `name` where `user_id IS NULL`), so it's safe to re-run;
-  run it any time after the publication step.
+  against the partial unique index on `name` where `user_id IS NULL`), so it's safe to re-run.
 
 ### Test layers
 
@@ -60,8 +70,8 @@ right one by name alone:
 | Command | Covers | Needs |
 | --- | --- | --- |
 | `pnpm test` (`pnpm -r test`) | everything without a suffix | nothing |
-| `pnpm --filter @workouty/api test:int` | `*.int.test.ts` | `postgres`, `mailpit` |
-| `pnpm --filter @workouty/api test:e2e` | `*.e2e.test.ts` — boots a Nest app | `postgres`, `mailpit` |
+| `pnpm --filter @workouty/api test:int` | `*.int.test.ts` | `db`, `mailpit` |
+| `pnpm --filter @workouty/api test:e2e` | `*.e2e.test.ts` — boots a Nest app | `db`, `mailpit` |
 | `pnpm --filter @workouty/mobile test:sync` | `*.node.test.ts` — sync round-trip | the whole stack |
 
 Only the first row runs in CI. The other three are yours to run locally before pushing
@@ -113,13 +123,16 @@ cp .env.prod.example .env.prod        # then fill in JWT_PRIVATE_KEY and the pas
 docker compose --env-file .env.prod -f compose.prod.yml up -d --build --wait
 ```
 
-That's the entire setup. Unlike the dev stack, there is no follow-up checklist. The API
-applies drizzle migrations from its own entrypoint (`apps/api/docker-entrypoint.sh`) before
-the server starts, so a container can never serve traffic against a schema it wasn't built
-for. `db-bootstrap` then applies the PowerSync publication and the global exercise seed, and
-`powersync` is gated on it completing — so the "restart PowerSync after changing the
-publication" trap from the dev instructions above cannot happen here. `--wait` returns once
-every long-running service reports healthy.
+That's the entire setup, and it bootstraps the same way the dev stack does. The API applies
+drizzle migrations from its own entrypoint (`apps/api/docker-entrypoint.sh`) before the server
+starts, so a container can never serve traffic against a schema it wasn't built for.
+`db-bootstrap` then applies the PowerSync publication, the `powersync_role` grants, and the
+global exercise seed, and `powersync` is gated on it completing. `--wait` returns once every
+long-running service reports healthy.
+
+`db-bootstrap` re-runs on every `up`, which is also how you rotate the replication password:
+change `PS_REPLICATION_PASSWORD` in `.env.prod` and redeploy. Both halves move together —
+the role's password and the URI PowerSync dials with come from the same variable.
 
 The migration entrypoint assumes a **single API instance**. Several replicas would race;
 drizzle wraps each migration in a transaction so the loser exits rather than corrupting
@@ -127,7 +140,29 @@ anything, but scaling out wants a dedicated one-shot migration step first.
 
 Exactly three ports are published: `WEB_PORT`, `API_PORT`, `POWERSYNC_PORT`. Neither
 database is published at all — reach them with
-`docker compose --env-file .env.prod -f compose.prod.yml exec postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"`.
+`docker compose --env-file .env.prod -f compose.prod.yml exec db psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"`.
+
+### Checking on replication
+
+**A healthy PowerSync container does not mean replication is working.** The probes report on
+the process, not the WAL stream: drop the publication and `/probes/readiness` still answers
+200 while every table silently stops syncing. Replication errors surface in exactly two
+places — the container logs, and PowerSync's admin API, which `PS_ADMIN_TOKEN` unlocks:
+
+```bash
+curl -s -X POST http://localhost:6101/api/admin/v1/diagnostics \
+  -H "Authorization: Bearer $PS_ADMIN_TOKEN" | python3 -m json.tool
+```
+
+The two `errors` arrays are the signal — one per connection, one per sync-rule table — plus
+`replication_lag_bytes` and `initial_replication_done`. Empty arrays and `connected: true`
+mean the stream is genuinely flowing. Poll this rather than the probes if you ever wire up
+alerting; PowerSync's own production guidance names it the source of replication issues for
+self-hosted instances.
+
+The admin API shares the port with the sync API, so in production `/api/admin/` must not be
+reachable from the internet. Block it at whatever terminates TLS — the token is the only
+thing standing in front of it otherwise.
 
 ### The web image
 
