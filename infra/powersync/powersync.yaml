@@ -16,11 +16,22 @@ port: 8080
 sync_config:
   path: /config/sync_rules.yaml
 
-# The API that serves this JWKS endpoint arrives in Milestone 2. Until then no client
-# authenticates, which does not prevent replication from running. See Step 5.
+# No development tokens: clients authenticate with the RS256 tokens the API signs, verified
+# against the public key it serves at /.well-known/jwks.json. `audience` must stay in step with
+# the API's AUDIENCE constant (apps/api/src/auth/jwt.service.ts) — a mismatch rejects every
+# token with a 401 that says nothing about which side is wrong.
 client_auth:
   jwks_uri: !env PS_JWKS_URL
   audience: ['workouty']
+
+# Gates /api/admin/v1/*, whose diagnostics endpoint is the only way to see replication errors
+# from outside the logs — the health probes answer 200 while replication is broken, so they
+# cannot be the alerting signal. Served on the same port as the sync API, so anything fronting
+# this service publicly should refuse /api/admin/ from the internet and leave it to the
+# operator's network.
+api:
+  tokens:
+    - !env PS_ADMIN_TOKEN
 
 system:
   logging:

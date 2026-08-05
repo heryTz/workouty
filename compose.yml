@@ -1,7 +1,7 @@
 name: workouty
 
 services:
-  postgres:
+  db:
     image: postgres:18
     restart: unless-stopped
     # PowerSync replicates via the logical WAL; the default `replica` level is not enough.
@@ -10,12 +10,10 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
-    # Loopback only. Nothing off-host needs the database: PowerSync reaches it over the
-    # Compose network, and drizzle-kit/tests connect via localhost.
     ports:
       - "127.0.0.1:6103:5432"
     volumes:
-      - pg_data:/var/lib/postgresql
+      - db_data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
@@ -39,13 +37,38 @@ services:
       timeout: 5s
       retries: 5
 
+  # Waits on `api` because the API applies migrations from its entrypoint, and publication.sql
+  # names tables that must already exist. powersync-role.sql then grants SELECT on whatever the
+  # publication ended up containing, so it has to come second. All three scripts are idempotent,
+  # so `docker compose up -d db-bootstrap` is also how you re-apply them after editing one.
+  db-bootstrap:
+    image: postgres:18
+    restart: "no"
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      PGHOST: db
+      PGUSER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB}
+      PS_REPLICATION_USER: ${PS_REPLICATION_USER}
+      PS_REPLICATION_PASSWORD: ${PS_REPLICATION_PASSWORD}
+    volumes:
+      - ./infra/postgres:/sql:ro
+    entrypoint: ["psql", "-v", "ON_ERROR_STOP=1", "-f", "/sql/publication.sql", "-f", "/sql/powersync-role.sql", "-f", "/sql/seed-exercises.sql"]
+
   powersync:
     image: journeyapps/powersync-service:1.23.3
     restart: unless-stopped
     depends_on:
-      postgres:
-        condition: service_healthy
       ps-storage:
+        condition: service_healthy
+      # PowerSync reads the publication once, at startup. Booting before db-bootstrap means
+      # replicating against a publication that does not exist yet, until manually restarted.
+      db-bootstrap:
+        condition: service_completed_successfully
+      api:
         condition: service_healthy
     command: ["start", "-r", "unified"]
     ports:
@@ -55,9 +78,12 @@ services:
     environment:
       POWERSYNC_CONFIG_PATH: /config/powersync.yaml
       NODE_OPTIONS: --max-old-space-size=1000
-      PS_DATA_SOURCE_URI: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      PS_DATA_SOURCE_URI: postgresql://${PS_REPLICATION_USER}:${PS_REPLICATION_PASSWORD}@db:5432/${POSTGRES_DB}
       PS_STORAGE_SOURCE_URI: postgresql://${PS_STORAGE_USER}:${PS_STORAGE_PASSWORD}@ps-storage:5432/${PS_STORAGE_DB}
       PS_JWKS_URL: http://api:3000/.well-known/jwks.json
+      # Guarded even in dev: unset would resolve to an empty string, and `tokens: ['']` opens
+      # the admin API to a bearer token of "".
+      PS_ADMIN_TOKEN: ${PS_ADMIN_TOKEN:?set PS_ADMIN_TOKEN in .env — see .env.example}
     healthcheck:
       test: ["CMD-SHELL", "node -e \"fetch('http://localhost:8080/probes/readiness').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
       interval: 5s
@@ -68,8 +94,8 @@ services:
     image: axllent/mailpit:v1.30.2
     restart: unless-stopped
     ports:
-      - "127.0.0.1:6105:1025"  # SMTP, reached by the API over the Compose network
-      - "127.0.0.1:6106:8025"  # web inbox, for you
+      - "127.0.0.1:6105:1025"
+      - "127.0.0.1:6106:8025"
     healthcheck:
       test: ["CMD-SHELL", "wget --spider -q http://localhost:8025 || exit 1"]
       interval: 5s
@@ -82,10 +108,10 @@ services:
       dockerfile: apps/api/Dockerfile
     restart: unless-stopped
     depends_on:
-      postgres:
+      db:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
       JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY}
       SMTP_URL: smtp://mailpit:1025
     ports:
@@ -97,5 +123,5 @@ services:
       retries: 12
 
 volumes:
-  pg_data:
+  db_data:
   ps_storage_data:

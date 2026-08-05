@@ -1,9 +1,7 @@
-# Distinct project name so a prod and a dev stack can coexist on one host without sharing
-# volumes or container names.
 name: workouty-prod
 
 services:
-  postgres:
+  db:
     image: postgres:18
     restart: unless-stopped
     # PowerSync replicates via the logical WAL; the default `replica` level is not enough.
@@ -13,7 +11,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in your env file}
       POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in your env file}
     volumes:
-      - pg_data:/var/lib/postgresql
+      - db_data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
@@ -35,8 +33,9 @@ services:
       timeout: 5s
       retries: 5
 
-  # Waits on `api` because the API applies migrations from its entrypoint, and
-  # publication.sql names tables that must already exist. Both scripts are idempotent.
+  # Waits on `api` because the API applies migrations from its entrypoint, and publication.sql
+  # names tables that must already exist. powersync-role.sql then grants SELECT on whatever the
+  # publication ended up containing, so it has to come second. All three scripts are idempotent.
   db-bootstrap:
     image: postgres:18
     restart: "no"
@@ -44,13 +43,15 @@ services:
       api:
         condition: service_healthy
     environment:
-      PGHOST: postgres
+      PGHOST: db
       PGUSER: ${POSTGRES_USER}
       PGPASSWORD: ${POSTGRES_PASSWORD}
       PGDATABASE: ${POSTGRES_DB}
+      PS_REPLICATION_USER: ${PS_REPLICATION_USER:?set PS_REPLICATION_USER in your env file}
+      PS_REPLICATION_PASSWORD: ${PS_REPLICATION_PASSWORD:?set PS_REPLICATION_PASSWORD in your env file}
     volumes:
       - ./infra/postgres:/sql:ro
-    entrypoint: ["psql", "-v", "ON_ERROR_STOP=1", "-f", "/sql/publication.sql", "-f", "/sql/seed-exercises.sql"]
+    entrypoint: ["psql", "-v", "ON_ERROR_STOP=1", "-f", "/sql/publication.sql", "-f", "/sql/powersync-role.sql", "-f", "/sql/seed-exercises.sql"]
 
   powersync:
     image: journeyapps/powersync-service:1.23.3
@@ -72,9 +73,12 @@ services:
     environment:
       POWERSYNC_CONFIG_PATH: /config/powersync.yaml
       NODE_OPTIONS: --max-old-space-size=1000
-      PS_DATA_SOURCE_URI: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      PS_DATA_SOURCE_URI: postgresql://${PS_REPLICATION_USER}:${PS_REPLICATION_PASSWORD}@db:5432/${POSTGRES_DB}
       PS_STORAGE_SOURCE_URI: postgresql://${PS_STORAGE_USER}:${PS_STORAGE_PASSWORD}@ps-storage:5432/${PS_STORAGE_DB}
       PS_JWKS_URL: http://api:3000/.well-known/jwks.json
+      # Unset would resolve to an empty string, and `tokens: ['']` opens the admin API to a
+      # bearer token of "".
+      PS_ADMIN_TOKEN: ${PS_ADMIN_TOKEN:?generate one — see .env.prod.example}
     healthcheck:
       test: ["CMD-SHELL", "node -e \"fetch('http://localhost:8080/probes/readiness').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
       interval: 5s
@@ -87,17 +91,14 @@ services:
       dockerfile: apps/api/Dockerfile
     restart: unless-stopped
     depends_on:
-      postgres:
+      db:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
       JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY:?generate one — see .env.prod.example}
-      # Nodemailer builds the transport lazily: a wrong value still starts and still reports
-      # healthy, surfacing only when a password-reset mail is actually sent.
       SMTP_URL: ${SMTP_URL:?set SMTP_URL to your mail relay — this stack has no built-in one}
       # Unset would mean "allow all" — the dev default.
       CORS_ORIGINS: ${PUBLIC_WEB_URL:?set PUBLIC_WEB_URL in your env file}
-      # The web app has no /reset route yet; these links 404 until that screen ships.
       APP_RESET_URL_BASE: ${PUBLIC_WEB_URL}/reset
     ports:
       - "${API_PORT:-6100}:3000"
@@ -111,13 +112,10 @@ services:
     build:
       context: .
       dockerfile: apps/mobile/Dockerfile
-      # Expo inlines these into the bundle, so changing them needs `--build`, not a restart.
       args:
         EXPO_PUBLIC_API_URL: ${PUBLIC_API_URL:?set PUBLIC_API_URL in your env file}
         EXPO_PUBLIC_POWERSYNC_URL: ${PUBLIC_POWERSYNC_URL:?set PUBLIC_POWERSYNC_URL in your env file}
     restart: unless-stopped
-    # No depends_on: only the browser talks to the API, so waiting would delay the login
-    # page during a backend restart for no gain.
     ports:
       - "${WEB_PORT:-6102}:80"
     healthcheck:
@@ -127,5 +125,5 @@ services:
       retries: 5
 
 volumes:
-  pg_data:
+  db_data:
   ps_storage_data:
