@@ -25,7 +25,9 @@ RUN pnpm --filter @workouty/api deploy --prod --legacy --config.node-linker=hois
 FROM node:22-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
+RUN apk add --no-cache postgresql-client
 COPY --from=build /out ./
+COPY apps/api/sql ./sql
 COPY --chmod=0755 apps/api/docker-entrypoint.sh ./docker-entrypoint.sh
 EXPOSE 3000
 ENTRYPOINT ["/app/docker-entrypoint.sh"]

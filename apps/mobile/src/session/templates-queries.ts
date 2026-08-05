@@ -4,7 +4,7 @@
 //
 // Mirrors session/exercises.ts's useExercises pattern: no explicit user_id filter is needed
 // (the local PowerSync mirror only ever contains rows this device is allowed to see — templates
-// and template_exercises are both user_data-bucket-only, see infra/powersync/sync_rules.yaml,
+// and template_exercises are both user_data-bucket-only, see apps/powersync/sync_rules.yaml,
 // so a plain SELECT already lands scoped to the signed-in user). `deleted_at IS NULL` still
 // matters locally though: PowerSync's sync rules already drop a soft-deleted row from the
 // bucket, but a LOCAL soft-delete write (renameTemplate/deleteTemplate in template-writes.ts)
