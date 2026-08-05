@@ -86,9 +86,7 @@ services:
       retries: 12
 
   api:
-    build:
-      context: .
-      dockerfile: apps/api/Dockerfile
+    image: herytz/workouty-api:${IMAGE_TAG:-latest}
     restart: unless-stopped
     depends_on:
       db:
@@ -108,13 +106,10 @@ services:
       timeout: 5s
       retries: 12
 
+  # The API and PowerSync URLs the browser dials are inlined into this image's JS bundle at
+  # build time, by the release workflow. Nothing set here can repoint them.
   web:
-    build:
-      context: .
-      dockerfile: apps/mobile/Dockerfile
-      args:
-        EXPO_PUBLIC_API_URL: ${PUBLIC_API_URL:?set PUBLIC_API_URL in your env file}
-        EXPO_PUBLIC_POWERSYNC_URL: ${PUBLIC_POWERSYNC_URL:?set PUBLIC_POWERSYNC_URL in your env file}
+    image: herytz/workouty-web:${IMAGE_TAG:-latest}
     restart: unless-stopped
     ports:
       - "${WEB_PORT:-6102}:80"
