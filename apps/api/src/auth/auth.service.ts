@@ -209,8 +209,8 @@ export class AuthService {
       .returning({ id: passwordResetTokens.id })
     if (!inserted) throw new Error('insert returned no row')
 
-    const base = process.env.APP_RESET_URL_BASE ?? 'https://app.workouty.local/reset'
-    const url = `${base}?token=${inserted.id}.${secret}`
+    const base = process.env.APP_WEB_URL ?? 'https://app.workouty.local'
+    const url = `${base}/reset?token=${inserted.id}.${secret}`
     const { html, text } = await renderResetPassword({ url })
     await this.mailer.send({ to: row.email, subject: 'Reset your Workouty password', html, text })
   }
