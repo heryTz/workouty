@@ -1,5 +1,5 @@
 // Milestone 3 Task C2 — the milestone gate: proves the PowerSync client round-trip against
-// the RUNNING stack (api :3000, powersync :8080, postgres :5432), driven through our own
+// the RUNNING stack (api :6100, powersync :6101, postgres :6103), driven through our own
 // WorkoutyConnector — not stubbed.
 //
 //   UP:   a local SQLite write on a @powersync/node client reaches Postgres
@@ -30,8 +30,8 @@ import { createConnector, type WorkoutyConnector } from './connector'
 import { AppSchema } from './schema'
 import { InMemoryTokenStore } from './token-store'
 
-const API_URL = 'http://localhost:3000'
-const POWERSYNC_URL = 'http://localhost:8080'
+const API_URL = 'http://localhost:6100'
+const POWERSYNC_URL = 'http://localhost:6101'
 const DATABASE_URL = process.env.DATABASE_URL
 if (!DATABASE_URL) throw new Error('DATABASE_URL is required. Is the Compose stack up (see .env)?')
 

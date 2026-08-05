@@ -8,7 +8,7 @@ import { AppModule } from '../app.module'
 const databaseUrl = process.env.DATABASE_URL
 if (!databaseUrl) throw new Error('DATABASE_URL is required. Is the Compose stack up?')
 
-const MAILPIT_API = 'http://localhost:8025/api/v1'
+const MAILPIT_API = 'http://localhost:6106/api/v1'
 
 let app: INestApplication
 const pool = new Pool({ connectionString: databaseUrl })

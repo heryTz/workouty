@@ -25,12 +25,12 @@ pnpm --filter @workouty/api test:int
 This brings up four Compose services, all with healthchecks (`docker compose up -d --wait`
 blocks until every one of them reports healthy):
 
-- `postgres` — the app's source of truth (127.0.0.1:5432), running with `wal_level=logical`
+- `postgres` — the app's source of truth (127.0.0.1:6103), running with `wal_level=logical`
   so PowerSync can replicate from it.
-- `ps-storage` — PowerSync's own bucket storage database (127.0.0.1:5433). Unrelated to the
+- `ps-storage` — PowerSync's own bucket storage database (127.0.0.1:6104). Unrelated to the
   app schema; PowerSync manages its own `powersync` schema here.
-- `powersync` — the self-hosted PowerSync sync service (0.0.0.0:8080).
-- `mailpit` — a local SMTP sink for outgoing email. Web inbox at http://localhost:8025.
+- `powersync` — the self-hosted PowerSync sync service (0.0.0.0:6101).
+- `mailpit` — a local SMTP sink for outgoing email. Web inbox at http://localhost:6106.
 
 Two things about this sequence are not obvious and are easy to get wrong:
 

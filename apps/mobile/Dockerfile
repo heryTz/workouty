@@ -23,8 +23,8 @@ RUN pnpm --filter @workouty/shared build
 # `COPY apps/mobile` merges, so public/ would otherwise depend on the host's gitignored copy.
 RUN pnpm --filter @workouty/mobile exec powersync-web copy-assets --output public
 
-ARG EXPO_PUBLIC_API_URL=http://localhost:3000
-ARG EXPO_PUBLIC_POWERSYNC_URL=http://localhost:8080
+ARG EXPO_PUBLIC_API_URL=http://localhost:6100
+ARG EXPO_PUBLIC_POWERSYNC_URL=http://localhost:6101
 ENV EXPO_PUBLIC_API_URL=${EXPO_PUBLIC_API_URL}
 ENV EXPO_PUBLIC_POWERSYNC_URL=${EXPO_PUBLIC_POWERSYNC_URL}
 RUN pnpm --filter @workouty/mobile exec expo export --platform web --output-dir dist

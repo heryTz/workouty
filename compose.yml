@@ -13,7 +13,7 @@ services:
     # Loopback only. Nothing off-host needs the database: PowerSync reaches it over the
     # Compose network, and drizzle-kit/tests connect via localhost.
     ports:
-      - "127.0.0.1:5432:5432"
+      - "127.0.0.1:6103:5432"
     volumes:
       - pg_data:/var/lib/postgresql
     healthcheck:
@@ -30,7 +30,7 @@ services:
       POSTGRES_PASSWORD: ${PS_STORAGE_PASSWORD}
       POSTGRES_DB: ${PS_STORAGE_DB}
     ports:
-      - "127.0.0.1:5433:5432"
+      - "127.0.0.1:6104:5432"
     volumes:
       - ps_storage_data:/var/lib/postgresql
     healthcheck:
@@ -49,7 +49,7 @@ services:
         condition: service_healthy
     command: ["start", "-r", "unified"]
     ports:
-      - "8080:8080"
+      - "6101:8080"
     volumes:
       - ./infra/powersync:/config:ro
     environment:
@@ -68,8 +68,8 @@ services:
     image: axllent/mailpit:v1.30.2
     restart: unless-stopped
     ports:
-      - "127.0.0.1:1025:1025"  # SMTP, reached by the API over the Compose network
-      - "127.0.0.1:8025:8025"  # web inbox, for you
+      - "127.0.0.1:6105:1025"  # SMTP, reached by the API over the Compose network
+      - "127.0.0.1:6106:8025"  # web inbox, for you
     healthcheck:
       test: ["CMD-SHELL", "wget --spider -q http://localhost:8025 || exit 1"]
       interval: 5s
@@ -89,7 +89,7 @@ services:
       JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY}
       SMTP_URL: smtp://mailpit:1025
     ports:
-      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:6100:3000"
     healthcheck:
       test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
       interval: 5s
