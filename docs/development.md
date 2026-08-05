@@ -120,8 +120,13 @@ service — from one command:
 
 ```bash
 cp .env.prod.example .env.prod        # then fill in JWT_PRIVATE_KEY and the passwords
-docker compose --env-file .env.prod -f compose.prod.yml up -d --build --wait
+docker compose --env-file .env.prod -f compose.prod.yml up -d --pull always --wait
 ```
+
+Nothing is built here: `api` and `web` are pulled from Docker Hub at `IMAGE_TAG`, which
+defaults to `latest`. Pin it to a released version for a real deployment, and redeploy by
+changing it rather than by re-pulling a moving tag. The repo is still needed on the host —
+`db-bootstrap` and `powersync` bind-mount their config out of `infra/`.
 
 That's the entire setup, and it bootstraps the same way the dev stack does. The API applies
 drizzle migrations from its own entrypoint (`apps/api/docker-entrypoint.sh`) before the server
@@ -176,12 +181,17 @@ in-app navigation.
 
 **The API and PowerSync URLs are baked into the JS bundle at build time.** Expo inlines
 `EXPO_PUBLIC_*` during the export; there is no runtime override, so a container started with
-different environment variables still talks to whatever was compiled in. `PUBLIC_API_URL`
-and `PUBLIC_POWERSYNC_URL` in `.env.prod` are wired to Compose *build args*, which means
-changing either requires a rebuild:
+different environment variables still talks to whatever was compiled in. Since the prod stack
+pulls a prebuilt image, those URLs are fixed by the release workflow's `EXPO_PUBLIC_API_URL`
+and `EXPO_PUBLIC_POWERSYNC_URL` secrets — one published web image serves exactly one origin.
+Deploying to a different origin means setting those secrets and publishing again, or building
+locally:
 
 ```bash
-docker compose --env-file .env.prod -f compose.prod.yml up -d --build web
+docker build -f apps/mobile/Dockerfile \
+  --build-arg EXPO_PUBLIC_API_URL=https://api.example.com \
+  --build-arg EXPO_PUBLIC_POWERSYNC_URL=https://sync.example.com \
+  -t herytz/workouty-web:local .
 ```
 
 Both must be reachable **from the user's browser**, not merely from inside the Compose
