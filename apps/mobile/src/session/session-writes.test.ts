@@ -91,6 +91,7 @@ describe('logSet', () => {
       sessionExerciseId: 'se-1',
       setIndex: 0,
       reps: 10,
+      durationSeconds: null,
       weightKg: 42.5,
     })
 
@@ -99,17 +100,15 @@ describe('logSet', () => {
     expect(sql).toMatch(/INSERT INTO sets/)
     expect(sql).toMatch(/actual_rest_seconds/)
 
-    const [insertedId, userId, sessionExerciseId, setIndex, reps, weightKg, performedAt] = params
+    const [insertedId, userId, sessionExerciseId, setIndex, reps, durationSeconds, weightKg, performedAt] = params
     expect(insertedId).toBe(id)
     expect(userId).toBe('user-1')
     expect(sessionExerciseId).toBe('se-1')
     expect(setIndex).toBe(0)
     expect(reps).toBe(10)
+    expect(durationSeconds).toBeNull()
     expect(weightKg).toBe(42.5)
     expect(() => new Date(performedAt as string).toISOString()).not.toThrow()
-
-    // actual_rest_seconds is set to NULL via literal SQL, not passed as a bound param.
-    expect(params).not.toContain(null)
   })
 
   it('uses the provided performedAt instead of now when given', async () => {
@@ -121,12 +120,52 @@ describe('logSet', () => {
       sessionExerciseId: 'se-1',
       setIndex: 1,
       reps: 8,
+      durationSeconds: null,
       weightKg: 20,
       performedAt: explicitPerformedAt,
     })
 
     const [, params] = db.execute.mock.calls[0] as [string, unknown[]]
     expect(params).toContain(explicitPerformedAt)
+  })
+
+  it('inserts a held set as duration_seconds with reps left null', async () => {
+    const db = mockDb()
+
+    await logSet(db, {
+      userId: 'user-1',
+      sessionExerciseId: 'se-1',
+      setIndex: 0,
+      reps: null,
+      durationSeconds: 60,
+      weightKg: 10,
+    })
+
+    const [, params] = db.execute.mock.calls[0] as [string, unknown[]]
+    const [, , , , reps, durationSeconds, weightKg] = params
+    expect(reps).toBeNull()
+    expect(durationSeconds).toBe(60)
+    expect(weightKg).toBe(10)
+  })
+
+  it('defaults weightKg to 0, the normal case for an unweighted bodyweight set', async () => {
+    const db = mockDb()
+
+    await logSet(db, { userId: 'user-1', sessionExerciseId: 'se-1', setIndex: 0, reps: 12, durationSeconds: null })
+
+    const [, params] = db.execute.mock.calls[0] as [string, unknown[]]
+    expect(params[6]).toBe(0)
+  })
+
+  it('refuses a set that measures nothing, which the SQLite mirror would otherwise accept', async () => {
+    // The local mirror carries no CHECK constraints, so without this guard the row would insert,
+    // sync, and be rejected server-side by sets_measure_present_ck where the user never sees it.
+    const db = mockDb()
+
+    await expect(
+      logSet(db, { userId: 'user-1', sessionExerciseId: 'se-1', setIndex: 0, reps: null, durationSeconds: null }),
+    ).rejects.toThrow(/reps or durationSeconds/)
+    expect(db.execute).not.toHaveBeenCalled()
   })
 })
 

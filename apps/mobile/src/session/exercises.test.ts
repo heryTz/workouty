@@ -93,14 +93,30 @@ describe('addCustomExercise', () => {
     expect(sql).toMatch(/INSERT INTO exercises/)
     expect(sql).toMatch(/is_custom/)
 
-    const [insertedId, userId, name, muscleGroup, defaultRestSeconds, createdAt, updatedAt] = params
+    const [insertedId, userId, name, muscleGroup, defaultRestSeconds, loadType, measure, createdAt, updatedAt] = params
     expect(insertedId).toBe(id)
     expect(userId).toBe('user-1')
     expect(name).toBe('My Curl')
     expect(muscleGroup).toBe('arms')
     expect(defaultRestSeconds).toBe(90)
+    // Unspecified by this caller, so the pre-0003 behaviour: a weight moved for reps.
+    expect(loadType).toBe('external')
+    expect(measure).toBe('reps')
     expect(createdAt).toBe(updatedAt)
     expect(() => new Date(createdAt as string).toISOString()).not.toThrow()
+  })
+
+  it('persists an explicit load type and measure, so a custom plank is not stored as a barbell lift', async () => {
+    const execute = vi.fn().mockResolvedValue(undefined)
+
+    await addCustomExercise(
+      { execute },
+      { name: 'Dead hang', muscleGroup: 'back', userId: 'user-1', loadType: 'bodyweight', measure: 'duration' },
+    )
+
+    const [, params] = execute.mock.calls[0] as [string, unknown[]]
+    expect(params[5]).toBe('bodyweight')
+    expect(params[6]).toBe('duration')
   })
 
   it('trims the exercise name before inserting', async () => {

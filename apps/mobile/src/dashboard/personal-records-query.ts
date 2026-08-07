@@ -1,11 +1,19 @@
-// Per-exercise personal-best summary (Milestone 6 Task B1): every exercise's current best weight
-// set and best estimated-1RM set, via @workouty/shared's computePersonalBest.
+// Per-exercise personal-best summary (Milestone 6 Task B1): every exercise's current bests in
+// whichever dimensions apply to it, via @workouty/shared's computePersonalBest.
 import { useQuery } from '@powersync/react'
-import { computePersonalBest, type PersonalBest, type RecordSet } from '@workouty/shared'
+import {
+  computePersonalBest,
+  type ExerciseMeasurement,
+  type LoadType,
+  type Measure,
+  type PersonalBest,
+  type RecordSet,
+} from '@workouty/shared'
 
 export interface ExerciseRecord {
   exerciseId: string
   name: string
+  measurement: ExerciseMeasurement
   best: PersonalBest
 }
 
@@ -15,14 +23,18 @@ interface RecordRow {
   id: string
   performed_at: string
   weight_kg: number
-  reps: number
+  reps: number | null
+  duration_seconds: number | null
+  load_type: LoadType
+  measure: Measure
 }
 
 // Every live set joined to its exercise, ordered so rows group by exercise. Bests are computed in
 // JS (estimateOneRepMax's reps=1 case can't be done in SQL), so pull rows and reduce per exercise.
 export const personalRecordsSql = `
-  SELECT e.id AS exercise_id, e.name AS name, s.id AS id, s.performed_at AS performed_at,
-         s.weight_kg AS weight_kg, s.reps AS reps
+  SELECT e.id AS exercise_id, e.name AS name, e.load_type AS load_type, e.measure AS measure,
+         s.id AS id, s.performed_at AS performed_at, s.weight_kg AS weight_kg, s.reps AS reps,
+         s.duration_seconds AS duration_seconds
   FROM sets s
   JOIN session_exercises se ON se.id = s.session_exercise_id
   JOIN exercises e ON e.id = se.exercise_id
@@ -31,19 +43,25 @@ export const personalRecordsSql = `
 `
 
 export function mapPersonalRecordRows(rows: RecordRow[]): ExerciseRecord[] {
-  const byExercise = new Map<string, { name: string; sets: RecordSet[] }>()
+  const byExercise = new Map<string, { name: string; measurement: ExerciseMeasurement; sets: RecordSet[] }>()
   for (const r of rows) {
     let entry = byExercise.get(r.exercise_id)
     if (!entry) {
-      entry = { name: r.name, sets: [] }
+      entry = { name: r.name, measurement: { loadType: r.load_type, measure: r.measure }, sets: [] }
       byExercise.set(r.exercise_id, entry)
     }
-    entry.sets.push({ id: r.id, performedAt: r.performed_at, weightKg: r.weight_kg, reps: r.reps })
+    entry.sets.push({
+      id: r.id,
+      performedAt: r.performed_at,
+      weightKg: r.weight_kg,
+      reps: r.reps,
+      durationSeconds: r.duration_seconds,
+    })
   }
   const out: ExerciseRecord[] = []
-  for (const [exerciseId, { name, sets }] of byExercise) {
-    const best = computePersonalBest(sets)
-    if (best) out.push({ exerciseId, name, best })
+  for (const [exerciseId, { name, measurement, sets }] of byExercise) {
+    const best = computePersonalBest(sets, measurement)
+    if (best) out.push({ exerciseId, name, measurement, best })
   }
   return out
 }

@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm'
 import {
   boolean,
+  check,
   doublePrecision,
   index,
   integer,
@@ -36,11 +37,26 @@ export const exercises = pgTable(
     name: text('name').notNull(),
     muscleGroup: text('muscle_group').notNull(),
     defaultRestSeconds: integer('default_rest_seconds').notNull().default(90),
+    // How the exercise is loaded, which decides what `sets.weight_kg` MEANS:
+    //   'external'   — the load itself (a 60 kg bench press). 0 is a valid but odd entry.
+    //   'bodyweight' — load ADDED to the user's own body (a pull-up with a 20 kg belt).
+    //                  0 is the normal case and is what the UI defaults to.
+    // Deliberately independent of `measure` below: a weighted plank is bodyweight + duration.
+    loadType: text('load_type').notNull().default('external'),
+    // What a set of this exercise counts. Decides which of `sets.reps` / `sets.duration_seconds`
+    // is populated, and which dimension the progression chart and PR detection rank on — a
+    // bodyweight exercise has no weight to improve, so the signal is reps or seconds instead.
+    measure: text('measure').notNull().default('reps'),
     // Invariant: `isCustom` is true exactly when `userId IS NOT NULL`. Kept as a column
     // for client-side query ergonomics against the SQLite mirror.
     isCustom: boolean('is_custom').notNull().default(false),
   },
   (t) => [
+    // Value domains live in CHECKs rather than pg enums: PowerSync replicates an enum as text
+    // anyway, so an enum would buy nothing on the client while making every future value a
+    // migration on a type rather than on a constraint. Matches `muscle_group`, also plain text.
+    check('exercises_load_type_ck', sql`${t.loadType} IN ('external', 'bodyweight')`),
+    check('exercises_measure_ck', sql`${t.measure} IN ('reps', 'duration')`),
     // Two partial indexes, not one: Postgres treats NULLs as distinct, so a plain
     // unique(user_id, name) would happily allow duplicate built-in exercises.
     //
@@ -144,17 +160,30 @@ export const sets = pgTable(
       .notNull()
       .references(() => sessionExercises.id),
     setIndex: integer('set_index').notNull(),
-    reps: integer('reps').notNull(),
+    // Exactly one of `reps` / `durationSeconds` carries the set's measure, per the parent
+    // exercise's `measure` column. Neither can be NOT NULL: a plank has no reps and a
+    // push-up has no duration. `sets` is two joins from `exercises`, so the DB cannot check
+    // that the populated one MATCHES `measure` — the CHECK below only enforces the floor
+    // that a set measures something. Keeping the correspondence is the writer's job.
+    reps: integer('reps'),
+    durationSeconds: integer('duration_seconds'),
     // doublePrecision, not numeric: numeric round-trips as a string in Drizzle, and the
     // client mirror of this column is a SQLite REAL. Matching types keeps the two sides
     // honest. The unit is in the name so nobody writes pounds into it.
-    weightKg: doublePrecision('weight_kg').notNull(),
+    //
+    // For a `bodyweight` exercise this is the load ADDED to the body, not the total — hence
+    // the 0 default, which is the overwhelmingly common value there (see exercises.loadType).
+    weightKg: doublePrecision('weight_kg').notNull().default(0),
     // Rest taken AFTER this set, until "Stop rest" was pressed. The last set of an
     // exercise has no following rest, hence nullable.
     actualRestSeconds: integer('actual_rest_seconds'),
     performedAt: timestamp('performed_at', { withTimezone: true }).notNull(),
   },
   (t) => [
+    // "At least one", not "exactly one": this is the floor that rejects a set measuring
+    // nothing at all. It stays satisfiable if a future measure ever needs both (an AMRAP
+    // counts reps within a fixed time), which an exactly-one check would forbid.
+    check('sets_measure_present_ck', sql`${t.reps} IS NOT NULL OR ${t.durationSeconds} IS NOT NULL`),
     index('sets_user_id_idx').on(t.userId),
     index('sets_session_exercise_idx').on(t.sessionExerciseId),
   ],

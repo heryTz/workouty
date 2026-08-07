@@ -31,9 +31,15 @@ import { createInsertSchema } from 'drizzle-zod'
 import { z } from 'zod'
 import { exerciseRestPrefs, exercises, sessionExercises, sessions, sets, templateExercises, templates } from './schema'
 
+// `loadType`/`measure` are plain text columns fenced by CHECK constraints in the DB. Restating
+// the domains as enums here is not redundant: a violating value that reaches Postgres raises a
+// 23514, and upload.service.ts only narrows 23505 to a per-op rejection — anything else
+// propagates and rolls back the client's WHOLE batch. Rejecting it at the schema costs one op.
 export const insertExerciseSchema = createInsertSchema(exercises, {
   name: (s) => s.min(1).max(120),
   defaultRestSeconds: (s) => s.int().nonnegative(),
+  loadType: () => z.enum(['external', 'bodyweight']),
+  measure: () => z.enum(['reps', 'duration']),
 })
 
 export const insertTemplateSchema = createInsertSchema(templates, {
@@ -54,9 +60,13 @@ export const insertSessionExerciseSchema = createInsertSchema(sessionExercises, 
   position: (s) => s.int().nonnegative(),
 })
 
+// Both measures are nullable and positive-when-present: a set carries reps OR durationSeconds
+// depending on its exercise's `measure`, and neither 0 reps nor a 0-second hold is a set anyone
+// performed. The DB's `sets_measure_present_ck` backstops "at least one of the two".
 export const insertSetSchema = createInsertSchema(sets, {
   setIndex: (s) => s.int().nonnegative(),
-  reps: (s) => s.int().positive(),
+  reps: (s) => s.int().positive().nullable(),
+  durationSeconds: (s) => s.int().positive().nullable(),
   weightKg: (s) => s.nonnegative(),
   actualRestSeconds: (s) => s.int().nonnegative().nullable(),
   performedAt: () => z.coerce.date(),

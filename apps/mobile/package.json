@@ -59,7 +59,8 @@
     "web": "expo start --web --port 6102",
     "lint": "expo lint",
     "test": "vitest run",
-    "test:sync": "vitest run --config vitest.sync.config.ts"
+    "test:sync": "vitest run --config vitest.sync.config.ts",
+    "typecheck": "tsc --noEmit"
   },
   "private": true
 }
