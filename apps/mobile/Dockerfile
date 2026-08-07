@@ -25,8 +25,12 @@ RUN pnpm --filter @workouty/mobile exec powersync-web copy-assets --output publi
 
 ARG EXPO_PUBLIC_API_URL=http://localhost:6100
 ARG EXPO_PUBLIC_POWERSYNC_URL=http://localhost:6101
+ARG EXPO_PUBLIC_APP_VERSION
+ARG EXPO_PUBLIC_APP_RELEASE_DATE
 ENV EXPO_PUBLIC_API_URL=${EXPO_PUBLIC_API_URL}
 ENV EXPO_PUBLIC_POWERSYNC_URL=${EXPO_PUBLIC_POWERSYNC_URL}
+ENV EXPO_PUBLIC_APP_VERSION=${EXPO_PUBLIC_APP_VERSION}
+ENV EXPO_PUBLIC_APP_RELEASE_DATE=${EXPO_PUBLIC_APP_RELEASE_DATE}
 RUN pnpm --filter @workouty/mobile exec expo export --platform web --output-dir dist
 
 

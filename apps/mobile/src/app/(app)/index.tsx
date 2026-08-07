@@ -88,6 +88,13 @@ export default function Home() {
       />
 
       <Button
+        title="About"
+        variant="secondary"
+        onPress={() => router.push('/about')}
+        testID="about-nav-button"
+      />
+
+      <Button
         title="Sign out"
         variant="secondary"
         onPress={handleSignOut}
