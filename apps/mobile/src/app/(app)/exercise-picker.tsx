@@ -24,6 +24,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useLocalSearchParams, useRouter } from 'expo-router'
 import { Pressable, StyleSheet, View } from 'react-native'
+import type { LoadType, Measure } from '@workouty/shared'
 import { useAuth } from '@/auth/useAuth'
 import { usePowerSyncApp } from '@/powersync/PowerSyncProvider'
 import { addCustomExercise, useExercises, type ExerciseRow } from '@/session/exercises'
@@ -41,6 +42,27 @@ interface RejectedOpLike {
   id: string
   reason: string
 }
+
+// Everything the add-custom form collects. Kept as one shape because the rejection path has to
+// restore the WHOLE submission, not just the text fields — see pendingCustomInserts below.
+interface CustomExerciseDraft {
+  name: string
+  muscleGroup: string
+  loadType: LoadType
+  measure: Measure
+}
+
+// The two axes, phrased the way a lifter would rather than the way the column is spelled:
+// nobody thinks of a barbell as an "external load", they think of it as using weights.
+const LOAD_TYPE_OPTIONS: { value: LoadType; label: string }[] = [
+  { value: 'external', label: 'Weights' },
+  { value: 'bodyweight', label: 'Bodyweight' },
+]
+
+const MEASURE_OPTIONS: { value: Measure; label: string }[] = [
+  { value: 'reps', label: 'Reps' },
+  { value: 'duration', label: 'Time' },
+]
 
 function isRejectedOpLike(value: unknown): value is RejectedOpLike {
   return (
@@ -67,12 +89,16 @@ export default function ExercisePicker() {
   const [showAddForm, setShowAddForm] = useState(false)
   const [newName, setNewName] = useState('')
   const [newMuscleGroup, setNewMuscleGroup] = useState('')
+  // Defaults match the Postgres column defaults and cover the common case: a custom exercise is
+  // usually another way to move a weight for reps.
+  const [newLoadType, setNewLoadType] = useState<LoadType>('external')
+  const [newMeasure, setNewMeasure] = useState<Measure>('reps')
   const [addError, setAddError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
 
   // id -> what the user submitted, for the rejected exercise ops still "in flight" (neither
   // confirmed nor rejected yet). See the file header comment for why this exists.
-  const pendingCustomInserts = useRef(new Map<string, { name: string; muscleGroup: string }>())
+  const pendingCustomInserts = useRef(new Map<string, CustomExerciseDraft>())
 
   useEffect(() => {
     if (!lastRejected || lastRejected.length === 0) return
@@ -87,6 +113,8 @@ export default function ExercisePicker() {
 
       setNewName(pending.name)
       setNewMuscleGroup(pending.muscleGroup)
+      setNewLoadType(pending.loadType)
+      setNewMeasure(pending.measure)
       setAddError(
         entry.reason === 'conflict'
           ? `"${pending.name}" already exists`
@@ -166,18 +194,21 @@ export default function ExercisePicker() {
     setSaving(true)
     setAddError(null)
     try {
-      const id = await addCustomExercise(db, { name, muscleGroup, userId })
-      pendingCustomInserts.current.set(id, { name, muscleGroup })
+      const draft: CustomExerciseDraft = { name, muscleGroup, loadType: newLoadType, measure: newMeasure }
+      const id = await addCustomExercise(db, { ...draft, userId })
+      pendingCustomInserts.current.set(id, draft)
       // Optimistic success: clear + close the form immediately. The new row already shows up
       // via useExercises' reactive query. If the server later rejects it, the effect above
       // re-opens the form with the error and the typed values restored.
       setNewName('')
       setNewMuscleGroup('')
+      setNewLoadType('external')
+      setNewMeasure('reps')
       setShowAddForm(false)
     } finally {
       setSaving(false)
     }
-  }, [db, newName, newMuscleGroup, userId])
+  }, [db, newName, newMuscleGroup, newLoadType, newMeasure, userId])
 
   return (
     <Screen centered={false}>
@@ -214,6 +245,23 @@ export default function ExercisePicker() {
             autoCapitalize="none"
             testID="picker-add-muscle-group"
           />
+          <Segmented
+            label="Load"
+            options={LOAD_TYPE_OPTIONS}
+            value={newLoadType}
+            onChange={setNewLoadType}
+            testIDPrefix="picker-add-load-type"
+          />
+          <Segmented
+            label="Measure"
+            options={MEASURE_OPTIONS}
+            value={newMeasure}
+            onChange={setNewMeasure}
+            testIDPrefix="picker-add-measure"
+          />
+          <Text muted size="sm" testID="picker-add-hint">
+            {describeMeasurement(newLoadType, newMeasure)}
+          </Text>
           {addError ? (
             <View style={styles.errorBanner} testID="picker-add-error">
               <Text style={{ color: colors.danger }}>{addError}</Text>
@@ -271,6 +319,58 @@ export default function ExercisePicker() {
         </View>
       )}
     </Screen>
+  )
+}
+
+// Plain-language preview of what the two axes mean for logging, so the choice isn't made blind:
+// "Load"/"Measure" only become concrete once you see the fields they produce.
+function describeMeasurement(loadType: LoadType, measure: Measure): string {
+  const effort = measure === 'duration' ? 'seconds held' : 'reps'
+  return loadType === 'bodyweight'
+    ? `Logs ${effort}, plus any weight added on top.`
+    : `Logs ${effort} at a weight.`
+}
+
+// Two-or-more mutually exclusive options as a labelled row of chips. Local to this screen: the
+// dashboard's metric toggle is the only other one in the app and it drives off a different shape.
+function Segmented<T extends string>({
+  label,
+  options,
+  value,
+  onChange,
+  testIDPrefix,
+}: {
+  label: string
+  options: { value: T; label: string }[]
+  value: T
+  onChange: (value: T) => void
+  testIDPrefix: string
+}) {
+  return (
+    <View style={styles.segmentedBlock}>
+      <Text style={styles.segmentedLabel} size="sm">
+        {label}
+      </Text>
+      <View style={styles.segmentedRow} accessibilityRole="radiogroup" testID={testIDPrefix}>
+        {options.map((option) => {
+          const selected = option.value === value
+          return (
+            <Pressable
+              key={option.value}
+              accessibilityRole="radio"
+              accessibilityState={{ selected }}
+              onPress={() => onChange(option.value)}
+              style={[styles.segment, selected && styles.segmentSelected]}
+              testID={`${testIDPrefix}-${option.value}`}
+            >
+              <Text size="sm" style={selected ? styles.segmentTextSelected : undefined}>
+                {option.label}
+              </Text>
+            </Pressable>
+          )
+        })}
+      </View>
+    </View>
   )
 }
 
@@ -380,6 +480,36 @@ const styles = StyleSheet.create({
     borderRadius: radii.md,
     borderWidth: 1,
     borderColor: colors.border,
+  },
+  // Mirrors the dashboard's metric toggle (Field's label styling for the caption, the same
+  // accent-filled selected chip) so the two segmented controls in the app read as one thing.
+  segmentedBlock: {
+    gap: spacing.xs,
+  },
+  segmentedLabel: {
+    fontWeight: '600',
+    color: colors.textMuted,
+  },
+  segmentedRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  segment: {
+    minHeight: minTapTarget,
+    justifyContent: 'center',
+    paddingHorizontal: spacing.lg,
+    borderRadius: radii.md,
+    backgroundColor: colors.background,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  segmentSelected: {
+    borderColor: colors.accent,
+    backgroundColor: colors.accent,
+  },
+  segmentTextSelected: {
+    color: colors.textOnAccent,
+    fontWeight: '600',
   },
   errorBanner: {
     backgroundColor: colors.dangerBackground,

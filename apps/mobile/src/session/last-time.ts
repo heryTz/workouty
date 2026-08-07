@@ -1,7 +1,6 @@
 // "Last time" reference (Milestone 4 Task E3): while logging a set for the CURRENT session's
 // current exercise, show the user's top set from their most recent PRIOR session that included
-// that exercise -- e.g. "Last time: 60 kg x 8" -- so they know what to beat (spec 3.6). "Top set"
-// = the set with the highest weight_kg within that prior session, ties broken by higher reps.
+// that exercise -- e.g. "Last time: 60 kg x 8" -- so they know what to beat (spec 3.6).
 //
 // Query shape (see lastTimeTopSetSql): a subquery finds the most recent PRIOR session_id that has
 // at least one live set for this exercise, excluding the current session, ordered by
@@ -13,21 +12,44 @@ import { useQuery } from '@powersync/react'
 
 export interface LastTimeTopSet {
   weightKg: number
-  reps: number
+  reps: number | null
+  durationSeconds: number | null
 }
 
 interface LastTimeRow {
   weight_kg: number
-  reps: number
+  reps: number | null
+  duration_seconds: number | null
 }
+
+/**
+ * What "top set" means, per exercise. Ranking on weight alone is right only when weight is the
+ * whole load: every set of an unweighted push-up carries 0 kg, so `weight_kg DESC` would pick an
+ * arbitrary one and the user would be told to beat whichever row SQLite happened to return first.
+ *
+ * The first CASE is NULL for every row of a non-external-rep exercise, which ties them all and
+ * hands the decision to the second — SQLite treats NULL as smaller than any value, so a
+ * uniformly-NULL key simply has no effect on the ordering.
+ *
+ *   external + reps  -> weight, then reps   (unchanged from before load_type/measure existed)
+ *   bodyweight+ reps -> reps, then added weight
+ *   any + duration   -> hold, then added weight
+ */
+const TOP_SET_ORDER = `
+    ORDER BY
+      CASE WHEN e.load_type = 'external' AND e.measure = 'reps' THEN s.weight_kg END DESC,
+      CASE WHEN e.measure = 'duration' THEN s.duration_seconds ELSE s.reps END DESC,
+      s.weight_kg DESC
+`
 
 // Pure query builder so the SQL shape is unit-testable without a live PowerSync DB (see the
 // header comment above and last-time.test.ts).
 export function lastTimeTopSetSql(exerciseId: string, currentSessionId: string): { sql: string; params: unknown[] } {
   const sql = `
-    SELECT s.weight_kg AS weight_kg, s.reps AS reps
+    SELECT s.weight_kg AS weight_kg, s.reps AS reps, s.duration_seconds AS duration_seconds
     FROM sets s
     JOIN session_exercises se ON se.id = s.session_exercise_id
+    JOIN exercises e ON e.id = se.exercise_id
     WHERE se.exercise_id = ?
       AND se.deleted_at IS NULL
       AND s.deleted_at IS NULL
@@ -43,7 +65,7 @@ export function lastTimeTopSetSql(exerciseId: string, currentSessionId: string):
         ORDER BY sess2.started_at DESC
         LIMIT 1
       )
-    ORDER BY s.weight_kg DESC, s.reps DESC
+    ${TOP_SET_ORDER}
     LIMIT 1
   `
   return { sql, params: [exerciseId, exerciseId, currentSessionId] }
@@ -60,7 +82,7 @@ export function useLastTime(exerciseId: string | null, currentSessionId: string)
   const { data } = useQuery<LastTimeRow>(sql, params)
   const row = data[0]
   if (!row) return null
-  return { weightKg: row.weight_kg, reps: row.reps }
+  return { weightKg: row.weight_kg, reps: row.reps, durationSeconds: row.duration_seconds }
 }
 
 // The FULL last-time reference: every set the user logged for `exerciseId` in their most recent
@@ -71,7 +93,8 @@ export function useLastTime(exerciseId: string | null, currentSessionId: string)
 export interface LastSessionSet {
   setIndex: number
   weightKg: number
-  reps: number
+  reps: number | null
+  durationSeconds: number | null
   // Rest taken AFTER this set (seconds). The last set of the exercise has none, hence nullable.
   actualRestSeconds: number | null
 }
@@ -79,14 +102,15 @@ export interface LastSessionSet {
 interface LastSessionSetRow {
   set_index: number
   weight_kg: number
-  reps: number
+  reps: number | null
+  duration_seconds: number | null
   actual_rest_seconds: number | null
 }
 
 export function lastSessionSetsSql(exerciseId: string, currentSessionId: string): { sql: string; params: unknown[] } {
   const sql = `
     SELECT s.set_index AS set_index, s.weight_kg AS weight_kg, s.reps AS reps,
-           s.actual_rest_seconds AS actual_rest_seconds
+           s.duration_seconds AS duration_seconds, s.actual_rest_seconds AS actual_rest_seconds
     FROM sets s
     JOIN session_exercises se ON se.id = s.session_exercise_id
     WHERE se.exercise_id = ?
@@ -120,6 +144,7 @@ export function useLastSessionSets(exerciseId: string | null, currentSessionId: 
     setIndex: r.set_index,
     weightKg: r.weight_kg,
     reps: r.reps,
+    durationSeconds: r.duration_seconds,
     actualRestSeconds: r.actual_rest_seconds,
   }))
 }

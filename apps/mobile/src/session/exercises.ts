@@ -15,6 +15,7 @@
 import { useMemo } from 'react'
 import type { AbstractPowerSyncDatabase } from '@powersync/common'
 import { useQuery } from '@powersync/react'
+import type { LoadType, Measure } from '@workouty/shared'
 
 export interface ExerciseRow {
   id: string
@@ -131,6 +132,12 @@ export interface AddCustomExerciseInput {
   name: string
   muscleGroup: string
   userId: string
+  // How the exercise is loaded and what a set of it counts. Defaulted rather than required so
+  // existing callers keep the pre-0003 behaviour, and because these are the values the vast
+  // majority of custom exercises want — matching both the Postgres column defaults and the
+  // picker form's initial state.
+  loadType?: LoadType
+  measure?: Measure
 }
 
 // Minimal structural type of what addCustomExercise needs from the PowerSync database — kept
@@ -145,15 +152,18 @@ export interface ExecutableDb {
 // `lastRejected`, keyed by op id) back to this specific submission — see crud-mapping.ts/
 // connector.ts's onRejected contract and roundtrip.node.test.ts's REJECTION case for why a
 // duplicate (user_id, name) is rejected rather than silently accepted.
-export async function addCustomExercise(db: ExecutableDb, { name, muscleGroup, userId }: AddCustomExerciseInput): Promise<string> {
+export async function addCustomExercise(
+  db: ExecutableDb,
+  { name, muscleGroup, userId, loadType = 'external', measure = 'reps' }: AddCustomExerciseInput,
+): Promise<string> {
   const id = generateClientId()
   const nowISO = new Date().toISOString()
 
   await db.execute(
     `INSERT INTO exercises
-       (id, user_id, name, muscle_group, default_rest_seconds, is_custom, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, 1, ?, ?)`,
-    [id, userId, name.trim(), muscleGroup, DEFAULT_CUSTOM_REST_SECONDS, nowISO, nowISO],
+       (id, user_id, name, muscle_group, default_rest_seconds, load_type, measure, is_custom, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+    [id, userId, name.trim(), muscleGroup, DEFAULT_CUSTOM_REST_SECONDS, loadType, measure, nowISO, nowISO],
   )
 
   return id

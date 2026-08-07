@@ -102,8 +102,14 @@ export interface LogSetInput {
   userId: string
   sessionExerciseId: string
   setIndex: number
-  reps: number
-  weightKg: number
+  // Exactly one of these carries the set, per the exercise's `measure`: reps for a push-up,
+  // durationSeconds for a plank. Both are required rather than optional so a caller that forgets
+  // one fails here instead of writing a measureless row.
+  reps: number | null
+  durationSeconds: number | null
+  // The load for an external exercise, the ADDED load for a bodyweight one — 0 for a plain
+  // push-up. Defaults to 0 so the common bodyweight case needn't spell it out.
+  weightKg?: number
   // Defaults to now if omitted — the moment the set was actually performed, not necessarily
   // the moment this function runs, but for the common case (logging right after doing the set)
   // those coincide.
@@ -114,16 +120,34 @@ export interface LogSetInput {
 // (the preceding) set, once the user stops resting; see recordRest.
 export async function logSet(
   db: ExecutableDb,
-  { userId, sessionExerciseId, setIndex, reps, weightKg, performedAt }: LogSetInput,
+  { userId, sessionExerciseId, setIndex, reps, durationSeconds, weightKg = 0, performedAt }: LogSetInput,
 ): Promise<string> {
+  // Postgres enforces this as `sets_measure_present_ck`, but the local SQLite mirror carries no
+  // CHECK constraints — an invalid row would insert cleanly, sync, and be rejected server-side
+  // where the user would never see it. Failing at the write keeps that silent loss impossible.
+  if (reps === null && durationSeconds === null) {
+    throw new Error('logSet requires either reps or durationSeconds')
+  }
+
   const id = newId()
   const timestamp = nowIso()
 
   await db.execute(
     `INSERT INTO sets
-       (id, user_id, session_exercise_id, set_index, reps, weight_kg, actual_rest_seconds, performed_at, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)`,
-    [id, userId, sessionExerciseId, setIndex, reps, weightKg, performedAt ?? timestamp, timestamp, timestamp],
+       (id, user_id, session_exercise_id, set_index, reps, duration_seconds, weight_kg, actual_rest_seconds, performed_at, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)`,
+    [
+      id,
+      userId,
+      sessionExerciseId,
+      setIndex,
+      reps,
+      durationSeconds,
+      weightKg,
+      performedAt ?? timestamp,
+      timestamp,
+      timestamp,
+    ],
   )
 
   return id

@@ -25,10 +25,12 @@ describe('lastTimeTopSetSql', () => {
     expect(sql).toMatch(/JOIN sessions sess2 ON sess2\.id = se2\.session_id/)
   })
 
-  it('picks the top set (highest weight, ties broken by reps) within the found session', () => {
+  it('ranks the top set on the exercise measurement, joining exercises to read it', () => {
     const { sql } = lastTimeTopSetSql('exercise-1', 'session-2')
 
-    expect(sql).toMatch(/ORDER BY\s+s\.weight_kg DESC,\s*s\.reps DESC/i)
+    expect(sql).toMatch(/JOIN exercises e ON e\.id = se\.exercise_id/)
+    expect(sql).toMatch(/e\.load_type/)
+    expect(sql).toMatch(/e\.measure/)
     expect(sql).toMatch(/LIMIT 1/)
   })
 

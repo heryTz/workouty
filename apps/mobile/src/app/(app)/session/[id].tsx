@@ -32,6 +32,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocalSearchParams, useRouter } from 'expo-router'
 import { Platform, Pressable, StyleSheet, View } from 'react-native'
 import { useQuery } from '@powersync/react'
+import type { LoadType, Measure } from '@workouty/shared'
 import { useAuth } from '@/auth/useAuth'
 import { usePrSetIds } from '@/dashboard/pr-set-ids-query'
 import { usePowerSyncApp } from '@/powersync/PowerSyncProvider'
@@ -64,13 +65,16 @@ interface SessionExerciseRow {
   position: number
   name: string
   default_rest_seconds: number
+  load_type: LoadType
+  measure: Measure
 }
 
 interface SetRow {
   id: string
   session_exercise_id: string
   set_index: number
-  reps: number
+  reps: number | null
+  duration_seconds: number | null
   weight_kg: number
   actual_rest_seconds: number | null
   performed_at: string
@@ -80,6 +84,27 @@ interface TemplateExerciseForSessionRow {
   exercise_id: string
   position: number
   name: string
+}
+
+/**
+ * How one logged set reads back, for both the current session's rows and the "Last time" block.
+ *
+ * "12 × 0kg" is a nonsense way to describe a push-up, so an unweighted bodyweight set shows the
+ * bare count. Anything strapped on is shown as an explicit "+", because for these exercises the
+ * number is what was ADDED, not what was lifted.
+ *
+ *   Bench press  -> "8 × 60kg"      Push-up  -> "12"      Weighted pull-up -> "5 +20kg"
+ *   Plank        -> "60s"           Weighted plank       -> "60s +10kg"
+ */
+function formatSetPerformance(
+  { load_type, measure }: Pick<SessionExerciseRow, 'load_type' | 'measure'>,
+  set: { reps: number | null; durationSeconds: number | null; weightKg: number },
+): string {
+  const effort = measure === 'duration' ? `${set.durationSeconds ?? 0}s` : `${set.reps ?? 0}`
+  if (load_type === 'bodyweight') {
+    return set.weightKg > 0 ? `${effort} +${set.weightKg}kg` : effort
+  }
+  return `${effort} × ${set.weightKg}kg`
 }
 
 interface RestState {
@@ -103,6 +128,8 @@ const SESSION_EXERCISES_QUERY = `
     se.exercise_id AS exercise_id,
     se.position AS position,
     e.name AS name,
+    e.load_type AS load_type,
+    e.measure AS measure,
     COALESCE(p.rest_seconds, e.default_rest_seconds) AS default_rest_seconds
   FROM session_exercises se
   JOIN exercises e ON e.id = se.exercise_id
@@ -117,6 +144,7 @@ const SETS_QUERY = `
     s.session_exercise_id AS session_exercise_id,
     s.set_index AS set_index,
     s.reps AS reps,
+    s.duration_seconds AS duration_seconds,
     s.weight_kg AS weight_kg,
     s.actual_rest_seconds AS actual_rest_seconds,
     s.performed_at AS performed_at
@@ -198,6 +226,9 @@ export default function ActiveSession() {
   const prSetIds = usePrSetIds(currentExercise?.exercise_id ?? null)
 
   const [reps, setReps] = useState('')
+  // Kept separate from `reps` rather than reusing one "effort" field: switching from a plank to
+  // push-ups mid-session would otherwise carry 60 over as a rep count.
+  const [duration, setDuration] = useState('')
   const [weight, setWeight] = useState('')
   const [logging, setLogging] = useState(false)
   const [restState, setRestState] = useState<RestState | null>(null)
@@ -247,16 +278,15 @@ export default function ActiveSession() {
 
   const handleLogSet = useCallback(async () => {
     if (!userId || !currentExercise) return
-    const repsNum = Number(reps)
+    const isHold = currentExercise.measure === 'duration'
+    // A whole positive count either way — 8 reps or 60 seconds. `Number('')` is 0, so a blank
+    // field fails this and the button is a no-op, same as before.
+    const effortNum = Number(isHold ? duration : reps)
+    if (!Number.isInteger(effortNum) || effortNum <= 0) return
+    // Blank weight means 0, which is exactly right for an unweighted bodyweight set and the
+    // reason the field is optional rather than required for those.
     const weightNum = Number(weight)
-    if (
-      !Number.isFinite(repsNum) ||
-      repsNum <= 0 ||
-      !Number.isInteger(repsNum) ||
-      !Number.isFinite(weightNum) ||
-      weightNum < 0
-    )
-      return
+    if (!Number.isFinite(weightNum) || weightNum < 0) return
 
     setLogging(true)
     try {
@@ -265,10 +295,12 @@ export default function ActiveSession() {
         userId,
         sessionExerciseId: currentExercise.id,
         setIndex: existingSets.length,
-        reps: repsNum,
+        reps: isHold ? null : effortNum,
+        durationSeconds: isHold ? effortNum : null,
         weightKg: weightNum,
       })
       setReps('')
+      setDuration('')
       setWeight('')
 
       const restStartedAtMs = Date.now()
@@ -281,7 +313,7 @@ export default function ActiveSession() {
     } finally {
       setLogging(false)
     }
-  }, [db, userId, currentExercise, reps, weight, setsByExercise])
+  }, [db, userId, currentExercise, reps, duration, weight, setsByExercise])
 
   const handleStopRest = useCallback(async () => {
     if (!restState) return
@@ -516,18 +548,25 @@ export default function ActiveSession() {
           <Text size="sm" muted>
             Logging: {currentExercise.name}
           </Text>
+          {currentExercise.measure === 'duration' ? (
+            <Field
+              label="Duration (s)"
+              value={duration}
+              onChangeText={setDuration}
+              keyboardType="number-pad"
+              testID="duration-field"
+            />
+          ) : (
+            <Field label="Reps" value={reps} onChangeText={setReps} keyboardType="number-pad" testID="reps-field" />
+          )}
+          {/* Never hidden for bodyweight — a weighted pull-up or a plate on a plank is exactly
+              what this records. It is just optional there, defaulting to 0. */}
           <Field
-            label="Reps"
-            value={reps}
-            onChangeText={setReps}
-            keyboardType="number-pad"
-            testID="reps-field"
-          />
-          <Field
-            label="Weight (kg)"
+            label={currentExercise.load_type === 'bodyweight' ? 'Added weight (kg)' : 'Weight (kg)'}
             value={weight}
             onChangeText={setWeight}
             keyboardType="decimal-pad"
+            placeholder={currentExercise.load_type === 'bodyweight' ? '0' : undefined}
             testID="weight-field"
           />
           <Button title="Log set" onPress={handleLogSet} loading={logging} testID="log-set-button" />
@@ -690,7 +729,12 @@ function SessionExerciseCard({
           sets.map((s) => (
             <View key={s.id} style={styles.setRow}>
               <Text muted size="sm" testID={`set-row-${s.id}`}>
-                Set {s.set_index + 1}: {s.reps} × {s.weight_kg}kg
+                Set {s.set_index + 1}:{' '}
+                {formatSetPerformance(sessionExercise, {
+                  reps: s.reps,
+                  durationSeconds: s.duration_seconds,
+                  weightKg: s.weight_kg,
+                })}
                 {s.actual_rest_seconds != null ? ` · rest ${s.actual_rest_seconds}s` : ''}
               </Text>
               {prSetIds.has(s.id) ? (
@@ -709,7 +753,7 @@ function SessionExerciseCard({
             </Text>
             {lastSessionSets.map((ls) => (
               <Text key={ls.setIndex} size="sm" muted testID={`last-time-set-${sessionExercise.id}-${ls.setIndex}`}>
-                Set {ls.setIndex + 1}: {ls.reps} × {ls.weightKg}kg
+                Set {ls.setIndex + 1}: {formatSetPerformance(sessionExercise, ls)}
                 {ls.actualRestSeconds != null ? ` · rest ${formatMmSs(ls.actualRestSeconds)}` : ''}
               </Text>
             ))}

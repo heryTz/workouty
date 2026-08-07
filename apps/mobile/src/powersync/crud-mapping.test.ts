@@ -173,6 +173,65 @@ describe('toUploadOp', () => {
     expect(toUploadOp(entryFalse).data).toEqual({ name: 'Bench', isCustom: false })
   })
 
+  // A PUT's opData carries only the columns SQLite holds a value for, so the two measures are
+  // mutually absent rather than explicitly null: a plank set has no `reps` key at all. Both
+  // shapes must survive the boundary untouched — `sets.reps` is nullable server-side, so an
+  // absent key validates, but a `reps: 0` filled in to "complete" the row would not.
+  it('passes a duration set through with reps absent and added weight preserved', () => {
+    const entry: CrudEntryLike = {
+      op: 'PUT',
+      id: '550e8400-e29b-41d4-a716-446655440013',
+      table: 'sets',
+      opData: { set_index: 0, duration_seconds: 60, weight_kg: 10, performed_at: '2026-08-07T00:00:00.000Z' },
+    }
+
+    const result = toUploadOp(entry)
+
+    expect(result.data).toEqual({
+      setIndex: 0,
+      durationSeconds: 60,
+      weightKg: 10,
+      performedAt: '2026-08-07T00:00:00.000Z',
+    })
+    expect('reps' in (result.data ?? {})).toBe(false)
+  })
+
+  it('passes an unweighted bodyweight set through with weight_kg 0 intact and duration absent', () => {
+    const entry: CrudEntryLike = {
+      op: 'PUT',
+      id: '550e8400-e29b-41d4-a716-446655440014',
+      table: 'sets',
+      opData: { set_index: 0, reps: 12, weight_kg: 0, performed_at: '2026-08-07T00:00:00.000Z' },
+    }
+
+    const result = toUploadOp(entry)
+
+    expect(result.data).toEqual({
+      setIndex: 0,
+      reps: 12,
+      weightKg: 0,
+      performedAt: '2026-08-07T00:00:00.000Z',
+    })
+    expect('durationSeconds' in (result.data ?? {})).toBe(false)
+  })
+
+  it('converts the exercise load_type and measure columns to camelCase', () => {
+    const entry: CrudEntryLike = {
+      op: 'PUT',
+      id: '550e8400-e29b-41d4-a716-446655440015',
+      table: 'exercises',
+      opData: { name: 'Plank', muscle_group: 'core', load_type: 'bodyweight', measure: 'duration', is_custom: 1 },
+    }
+
+    expect(toUploadOp(entry).data).toEqual({
+      name: 'Plank',
+      muscleGroup: 'core',
+      loadType: 'bodyweight',
+      measure: 'duration',
+      isCustom: true,
+    })
+  })
+
   it('leaves is_custom untouched on non-exercises tables (no such column) and on other tables generally', () => {
     const entry: CrudEntryLike = {
       op: 'PUT',
