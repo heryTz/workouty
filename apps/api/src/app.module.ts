@@ -7,6 +7,7 @@ import { MailModule } from './mail/mail.module'
 import { HealthController } from './health/health.controller'
 import { JwksController } from './auth/jwks.controller'
 import { SyncModule } from './sync/sync.module'
+import { VersionController } from './version/version.controller'
 
 @Module({
   imports: [
@@ -18,7 +19,7 @@ import { SyncModule } from './sync/sync.module'
     AuthModule,
     SyncModule,
   ],
-  controllers: [HealthController, JwksController],
+  controllers: [HealthController, JwksController, VersionController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
 export class AppModule {}

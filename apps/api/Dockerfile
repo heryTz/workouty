@@ -29,6 +29,10 @@ RUN apk add --no-cache postgresql-client
 COPY --from=build /out ./
 COPY apps/api/sql ./sql
 COPY --chmod=0755 apps/api/docker-entrypoint.sh ./docker-entrypoint.sh
+ARG APP_VERSION
+ARG APP_RELEASE_DATE
+ENV APP_VERSION=$APP_VERSION
+ENV APP_RELEASE_DATE=$APP_RELEASE_DATE
 EXPOSE 3000
 ENTRYPOINT ["/app/docker-entrypoint.sh"]
 CMD ["node", "dist/main.js"]
