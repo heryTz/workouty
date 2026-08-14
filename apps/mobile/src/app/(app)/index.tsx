@@ -9,6 +9,9 @@
 //
 // "Dashboard" (Milestone 6 Task B2) just navigates to /dashboard — that screen owns the
 // progression chart + personal records (see app/(app)/dashboard.tsx).
+//
+// "History" navigates to /sessions — the paginated list of past sessions (see
+// app/(app)/sessions.tsx).
 import { useCallback, useState } from 'react'
 import { useRouter } from 'expo-router'
 import { useStatus } from '@powersync/react'
@@ -71,6 +74,13 @@ export default function Home() {
         variant="secondary"
         onPress={() => router.push('/templates')}
         testID="start-from-template-button"
+      />
+
+      <Button
+        title="History"
+        variant="secondary"
+        onPress={() => router.push('/sessions')}
+        testID="sessions-nav-button"
       />
 
       <Button
