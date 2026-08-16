@@ -153,6 +153,76 @@ export async function logSet(
   return id
 }
 
+export interface UpdateSetInput {
+  setId: string
+  // Same either/or as LogSetInput, and required for the same reason: an edit that passes only the
+  // field it changed would blank the other one by omission.
+  reps: number | null
+  durationSeconds: number | null
+  weightKg: number
+}
+
+// Corrects what a set says was performed — the finished-session screen (app/(app)/sessions/[id].tsx)
+// edits a set through here. Uploads as a PATCH: none of these three columns is server-owned
+// (upload-contracts.ts), so all three survive the round trip.
+export async function updateSet(db: ExecutableDb, { setId, reps, durationSeconds, weightKg }: UpdateSetInput): Promise<void> {
+  if (reps === null && durationSeconds === null) {
+    throw new Error('updateSet requires either reps or durationSeconds')
+  }
+
+  await db.execute(`UPDATE sets SET reps = ?, duration_seconds = ?, weight_kg = ?, updated_at = ? WHERE id = ?`, [
+    reps,
+    durationSeconds,
+    weightKg,
+    nowIso(),
+    setId,
+  ])
+}
+
+export interface DeleteSetInput {
+  setId: string
+}
+
+interface SetIdentityRow {
+  session_exercise_id: string
+}
+
+interface SetIndexRow {
+  id: string
+  set_index: number
+}
+
+// Removes one logged set and closes the gap it leaves: the exercise's surviving sets are renumbered
+// to a contiguous 0..n-1. Without that, an exercise with two sets left could still read "Set 1,
+// Set 3", and resuming the session would log the next set at an index it already used (the active
+// screen picks `setIndex: existingSets.length`).
+//
+// The removal MUST be a SQL DELETE, not an UPDATE setting deleted_at — see
+// updateTemplateFromSession in template-writes.ts for why the UPDATE form round-trips to a no-op.
+// The renumbering is a read plus one UPDATE per row that actually moved, rather than a single
+// `set_index = set_index - 1` sweep, so an exercise whose indexes already had a gap comes out
+// contiguous too, and a set that didn't move doesn't get a pointless op in the upload queue.
+export async function deleteSet(db: QueryableDb, { setId }: DeleteSetInput): Promise<void> {
+  const owner = await db.getAll<SetIdentityRow>(`SELECT session_exercise_id FROM sets WHERE id = ? AND deleted_at IS NULL`, [
+    setId,
+  ])
+  const sessionExerciseId = owner[0]?.session_exercise_id
+  if (!sessionExerciseId) return
+
+  await db.execute(`DELETE FROM sets WHERE id = ?`, [setId])
+
+  const survivors = await db.getAll<SetIndexRow>(
+    `SELECT id, set_index FROM sets WHERE session_exercise_id = ? AND deleted_at IS NULL ORDER BY set_index ASC`,
+    [sessionExerciseId],
+  )
+
+  const timestamp = nowIso()
+  for (const [index, row] of survivors.entries()) {
+    if (row.set_index === index) continue
+    await db.execute(`UPDATE sets SET set_index = ?, updated_at = ? WHERE id = ?`, [index, timestamp, row.id])
+  }
+}
+
 export interface RecordRestInput {
   setId: string
   actualRestSeconds: number
