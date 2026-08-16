@@ -41,6 +41,7 @@ import { useLastSessionSets } from '@/session/last-time'
 import { playRestBeep } from '@/session/rest-beep'
 import { cancelRestAlarm, ensureRestChannel, requestNotificationPermission, scheduleRestAlarm } from '@/session/rest-notification'
 import { endSession, logSet, recordRest } from '@/session/session-writes'
+import { formatSetPerformance } from '@/session/set-format'
 import { createTemplateFromSession, removeSessionExercise, updateTemplateFromSession } from '@/session/template-writes'
 import {
   formatElapsed,
@@ -84,27 +85,6 @@ interface TemplateExerciseForSessionRow {
   exercise_id: string
   position: number
   name: string
-}
-
-/**
- * How one logged set reads back, for both the current session's rows and the "Last time" block.
- *
- * "12 × 0kg" is a nonsense way to describe a push-up, so an unweighted bodyweight set shows the
- * bare count. Anything strapped on is shown as an explicit "+", because for these exercises the
- * number is what was ADDED, not what was lifted.
- *
- *   Bench press  -> "8 × 60kg"      Push-up  -> "12"      Weighted pull-up -> "5 +20kg"
- *   Plank        -> "60s"           Weighted plank       -> "60s +10kg"
- */
-function formatSetPerformance(
-  { load_type, measure }: Pick<SessionExerciseRow, 'load_type' | 'measure'>,
-  set: { reps: number | null; durationSeconds: number | null; weightKg: number },
-): string {
-  const effort = measure === 'duration' ? `${set.durationSeconds ?? 0}s` : `${set.reps ?? 0}`
-  if (load_type === 'bodyweight') {
-    return set.weightKg > 0 ? `${effort} +${set.weightKg}kg` : effort
-  }
-  return `${effort} × ${set.weightKg}kg`
 }
 
 interface RestState {
