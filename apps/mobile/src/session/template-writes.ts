@@ -64,6 +64,17 @@ export interface CreateTemplateFromSessionInput {
 // Snapshots a session's current (live) exercises into a brand-new template: one `templates` row
 // plus one `template_exercises` row per session exercise (position preserved, default_rest_seconds
 // copied from the exercise). Returns the new template id.
+//
+// The session is then attached to the template it produced, so a freestyle workout you decide to
+// keep reads back as an instance of the template rather than as unlabelled history — and the
+// finish-time divergence check has something to compare against from that point on.
+//
+// `AND template_id IS NULL` is the whole rule: a session that was STARTED from a template keeps
+// pointing at that one, because what it was started from is a fact about the workout, not a
+// preference. That matters most for the divergence prompt's "Save as new", which runs this on a
+// session that already has a template and must not silently rewrite its origin. Keeping the guard
+// in the statement (rather than reading template_id first and branching) leaves no window between
+// the check and the write.
 export async function createTemplateFromSession(
   db: ExecutableDb,
   { userId, sessionId, name }: CreateTemplateFromSessionInput,
@@ -88,6 +99,12 @@ export async function createTemplateFromSession(
       [newId(), userId, templateId, row.exercise_id, row.position, row.default_rest_seconds, timestamp, timestamp],
     )
   }
+
+  await db.execute(`UPDATE sessions SET template_id = ?, updated_at = ? WHERE id = ? AND template_id IS NULL`, [
+    templateId,
+    timestamp,
+    sessionId,
+  ])
 
   return templateId
 }

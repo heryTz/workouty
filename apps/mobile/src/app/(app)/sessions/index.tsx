@@ -7,12 +7,14 @@
 // one reactive @powersync/react query, so a session finishing — here or on another device — updates
 // it live without a refetch.
 //
-// Finished sessions aren't tappable: /session/[id] is the ACTIVE-session screen (live elapsed
-// clock, log-a-set form, Finish), so opening a finished workout in it would read as though the
-// workout were still running. Only the in-progress session gets a control, and it resumes.
+// Two destinations, because a workout that happened and a workout you're in the middle of are
+// different things. Tapping any card opens /sessions/[id] — the read-only detail view of what was
+// performed. The in-progress session additionally gets a "Resume" button to /session/[id], the
+// ACTIVE-session screen (live elapsed clock, log-a-set form, Finish); opening a finished workout
+// in THAT would read as though it were still running, which is why it isn't the tap target here.
 import { useCallback, useState } from 'react'
 import { useRouter } from 'expo-router'
-import { StyleSheet, View } from 'react-native'
+import { Pressable, StyleSheet, View } from 'react-native'
 import {
   formatSessionDate,
   formatSessionDuration,
@@ -62,6 +64,7 @@ export default function Sessions() {
               <SessionHistoryCard
                 key={session.id}
                 session={session}
+                onOpen={() => router.push({ pathname: '/sessions/[id]', params: { id: session.id } })}
                 onResume={() => router.push({ pathname: '/session/[id]', params: { id: session.id } })}
               />
             ))}
@@ -80,23 +83,33 @@ export default function Sessions() {
   )
 }
 
-function SessionHistoryCard({ session, onResume }: { session: SessionHistoryRow; onResume: () => void }) {
+function SessionHistoryCard({
+  session,
+  onOpen,
+  onResume,
+}: {
+  session: SessionHistoryRow
+  onOpen: () => void
+  onResume: () => void
+}) {
   const durationSeconds = sessionDurationSeconds(session.started_at, session.ended_at)
   const duration = durationSeconds === null ? 'In progress' : formatSessionDuration(durationSeconds)
 
   return (
     <View style={styles.card} testID={`session-row-${session.id}`}>
-      <Text size="md" style={styles.date} testID={`session-date-${session.id}`}>
-        {formatSessionDate(session.started_at)}
-      </Text>
-      <Text muted size="sm" testID={`session-meta-${session.id}`}>
-        {formatSessionTime(session.started_at)} · {duration}
-      </Text>
-      {session.template_name ? (
-        <Text muted size="sm" testID={`session-template-${session.id}`}>
-          {session.template_name}
+      <Pressable accessibilityRole="button" onPress={onOpen} style={styles.cardBody} testID={`session-open-${session.id}`}>
+        <Text size="md" style={styles.date} testID={`session-date-${session.id}`}>
+          {formatSessionDate(session.started_at)}
         </Text>
-      ) : null}
+        <Text muted size="sm" testID={`session-meta-${session.id}`}>
+          {formatSessionTime(session.started_at)} · {duration}
+        </Text>
+        {session.template_name ? (
+          <Text muted size="sm" testID={`session-template-${session.id}`}>
+            {session.template_name}
+          </Text>
+        ) : null}
+      </Pressable>
       {session.ended_at === null ? (
         <Button title="Resume" onPress={onResume} style={styles.resume} testID={`session-resume-${session.id}`} />
       ) : null}
@@ -120,6 +133,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.border,
+    gap: spacing.xs,
+  },
+  cardBody: {
     gap: spacing.xs,
   },
   date: {

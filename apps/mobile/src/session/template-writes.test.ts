@@ -40,8 +40,8 @@ describe('createTemplateFromSession', () => {
     expect(readSql).toMatch(/deleted_at IS NULL/)
     expect(readParams).toEqual(['session-1'])
 
-    // 1 templates insert + 2 template_exercises inserts.
-    expect(db.execute).toHaveBeenCalledTimes(3)
+    // 1 templates insert + 2 template_exercises inserts + the attach of the session to it.
+    expect(db.execute).toHaveBeenCalledTimes(4)
 
     const [templateSql, templateParams] = db.execute.mock.calls[0] as [string, unknown[]]
     expect(templateSql).toMatch(/INSERT INTO templates/)
@@ -68,12 +68,41 @@ describe('createTemplateFromSession', () => {
     expect(restSeconds2).toBe(90)
   })
 
-  it('inserts only the templates row when the session has no live exercises', async () => {
+  it('inserts no template_exercises when the session has no live exercises', async () => {
     const db = mockDb([])
 
     await createTemplateFromSession(db, { userId: 'user-1', sessionId: 'session-1', name: 'Empty' })
 
-    expect(db.execute).toHaveBeenCalledTimes(1)
+    // The templates insert and the attach — and nothing in between.
+    expect(db.execute).toHaveBeenCalledTimes(2)
+    const [templateSql] = db.execute.mock.calls[0] as [string, unknown[]]
+    expect(templateSql).toMatch(/INSERT INTO templates/)
+  })
+
+  it('attaches the session to the template it just produced', async () => {
+    const db = mockDb([{ exercise_id: 'ex-1', position: 0, default_rest_seconds: 60 }])
+
+    const templateId = await createTemplateFromSession(db, {
+      userId: 'user-1',
+      sessionId: 'session-1',
+      name: 'Push Day',
+    })
+
+    const [attachSql, attachParams] = db.execute.mock.calls.at(-1) as [string, unknown[]]
+    expect(attachSql).toMatch(/UPDATE sessions/)
+    expect(attachParams[0]).toBe(templateId)
+    expect(attachParams.at(-1)).toBe('session-1')
+  })
+
+  it('leaves a session that already came from a template pointing at that one', async () => {
+    const db = mockDb([])
+
+    await createTemplateFromSession(db, { userId: 'user-1', sessionId: 'session-1', name: 'Push Day v2' })
+
+    // The guard is in the statement rather than in a read-then-write, so there is no window in
+    // which a concurrent write could slip between the check and the update.
+    const [attachSql] = db.execute.mock.calls.at(-1) as [string, unknown[]]
+    expect(attachSql).toMatch(/WHERE id = \? AND template_id IS NULL/)
   })
 
   it('does not interpolate values into the SQL string (uses parameter binding)', async () => {
