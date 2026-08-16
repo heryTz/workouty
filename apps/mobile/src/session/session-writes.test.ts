@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { addSessionExercise, endSession, logSet, recordRest, startSession } from './session-writes'
+import { addSessionExercise, deleteSet, endSession, logSet, recordRest, startSession, updateSet } from './session-writes'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
@@ -165,6 +165,106 @@ describe('logSet', () => {
     await expect(
       logSet(db, { userId: 'user-1', sessionExerciseId: 'se-1', setIndex: 0, reps: null, durationSeconds: null }),
     ).rejects.toThrow(/reps or durationSeconds/)
+    expect(db.execute).not.toHaveBeenCalled()
+  })
+})
+
+describe('updateSet', () => {
+  it('UPDATEs reps, weight_kg and updated_at on the given set id', async () => {
+    const db = mockDb()
+
+    await updateSet(db, { setId: 'set-1', reps: 9, durationSeconds: null, weightKg: 47.5 })
+
+    expect(db.execute).toHaveBeenCalledTimes(1)
+    const [sql, params] = db.execute.mock.calls[0] as [string, unknown[]]
+
+    expect(sql).toMatch(/UPDATE sets/)
+    expect(sql).toMatch(/reps\s*=\s*\?/)
+    expect(sql).toMatch(/weight_kg\s*=\s*\?/)
+    expect(sql).toMatch(/WHERE id = \?/)
+
+    const [reps, durationSeconds, weightKg, updatedAt, setId] = params
+    expect(reps).toBe(9)
+    expect(durationSeconds).toBeNull()
+    expect(weightKg).toBe(47.5)
+    expect(() => new Date(updatedAt as string).toISOString()).not.toThrow()
+    expect(setId).toBe('set-1')
+  })
+
+  it('writes a held set as duration_seconds with reps cleared back to null', async () => {
+    const db = mockDb()
+
+    await updateSet(db, { setId: 'set-1', reps: null, durationSeconds: 75, weightKg: 0 })
+
+    const [, params] = db.execute.mock.calls[0] as [string, unknown[]]
+    const [reps, durationSeconds] = params
+    expect(reps).toBeNull()
+    expect(durationSeconds).toBe(75)
+  })
+
+  it('refuses an edit that leaves the set measuring nothing', async () => {
+    // Same guard as logSet: the SQLite mirror has no CHECK constraints, so the row would update
+    // cleanly, sync, and be rejected server-side by sets_measure_present_ck out of the user's sight.
+    const db = mockDb()
+
+    await expect(updateSet(db, { setId: 'set-1', reps: null, durationSeconds: null, weightKg: 0 })).rejects.toThrow(
+      /reps or durationSeconds/,
+    )
+    expect(db.execute).not.toHaveBeenCalled()
+  })
+})
+
+describe('deleteSet', () => {
+  function mockDbWithSets(parentRows: unknown[], survivingRows: unknown[]) {
+    return {
+      execute: vi.fn().mockResolvedValue(undefined),
+      getAll: vi.fn().mockResolvedValueOnce(parentRows).mockResolvedValueOnce(survivingRows),
+    }
+  }
+
+  it('removes the row with a SQL DELETE rather than an UPDATE setting deleted_at', async () => {
+    // An UPDATE ... SET deleted_at uploads as a PATCH whose deletedAt the server drops, so the row
+    // comes straight back on the next download — see template-writes.ts for the full account.
+    const db = mockDbWithSets([{ session_exercise_id: 'se-1' }], [])
+
+    await deleteSet(db, { setId: 'set-1' })
+
+    const [sql, params] = db.execute.mock.calls[0] as [string, unknown[]]
+    expect(sql).toMatch(/DELETE FROM sets/)
+    expect(sql).not.toMatch(/deleted_at\s*=/)
+    expect(params).toEqual(['set-1'])
+  })
+
+  it('renumbers the surviving sets of that exercise back to contiguous set_index values', async () => {
+    const db = mockDbWithSets(
+      [{ session_exercise_id: 'se-1' }],
+      [
+        { id: 'set-a', set_index: 0 },
+        { id: 'set-c', set_index: 2 },
+        { id: 'set-d', set_index: 3 },
+      ],
+    )
+
+    await deleteSet(db, { setId: 'set-b' })
+
+    // set-a already sits at 0 and needs no write; the two after the gap shift down by one.
+    const renumbering = db.execute.mock.calls.slice(1) as [string, unknown[]][]
+    expect(renumbering).toHaveLength(2)
+    for (const [sql] of renumbering) {
+      expect(sql).toMatch(/UPDATE sets/)
+      expect(sql).toMatch(/set_index\s*=\s*\?/)
+    }
+    expect(renumbering[0][1][0]).toBe(1)
+    expect(renumbering[0][1][2]).toBe('set-c')
+    expect(renumbering[1][1][0]).toBe(2)
+    expect(renumbering[1][1][2]).toBe('set-d')
+  })
+
+  it('does nothing when the set is already gone', async () => {
+    const db = mockDbWithSets([], [])
+
+    await deleteSet(db, { setId: 'set-1' })
+
     expect(db.execute).not.toHaveBeenCalled()
   })
 })

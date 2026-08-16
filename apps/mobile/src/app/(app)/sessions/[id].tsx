@@ -1,12 +1,15 @@
-// Route: /sessions/[id] — a finished workout, read-only. Reached by tapping a card on the history
-// list (sessions/index.tsx).
+// Route: /sessions/[id] — a finished workout. Reached by tapping a card on the history list
+// (sessions/index.tsx).
 //
 // The counterpart to /session/[id], which is the ACTIVE-session screen and stays that: a live
-// elapsed clock, a log-set form, a rest countdown, Finish. Nothing here can change what was
-// performed — that record is closed — so the only control is "Save as template", which reads the
-// session's exercises and writes a NEW row elsewhere rather than touching this one. A session
-// that's still running is not an error to land on: it renders the same way, says "In progress"
-// instead of a duration, and offers Resume through to the active screen.
+// elapsed clock, a log-set form, a rest countdown, Finish. What this screen adds instead is
+// correction after the fact — each logged set can be edited (reps or hold, and weight) or deleted,
+// for the miscount you only notice once the workout is over. A session that's still running is not
+// an error to land on: it renders the same way, says "In progress" instead of a duration, offers
+// Resume through to the active screen, and its sets are editable here too.
+//
+// Everything else on the screen recomputes itself from the same reactive queries, so an edit or a
+// deletion moves the summary's set count and tonnage without any refresh of our own.
 //
 // PR badges mean "was a record when you did it", not "still is". markPersonalRecords flags a set
 // that strictly beat every EARLIER set (see packages/shared/src/personal-records.ts), so the
@@ -32,6 +35,7 @@ import {
   sessionDurationSeconds,
 } from '@/session/session-history'
 import { formatSetPerformance } from '@/session/set-format'
+import { deleteSet, updateSet } from '@/session/session-writes'
 import { createTemplateFromSession } from '@/session/template-writes'
 import { formatMmSs } from '@/session/timers'
 import { Button, Field, Heading, Screen, Text, colors, minTapTarget, radii, spacing } from '@/ui'
@@ -211,24 +215,157 @@ function PerformedExerciseCard({ exercise, sets }: { exercise: DetailExerciseRow
         </Text>
       ) : (
         sets.map((s) => (
-          <View key={s.id} style={styles.setRow}>
-            <Text muted size="sm" testID={`session-detail-set-${s.id}`}>
-              Set {s.set_index + 1}:{' '}
-              {formatSetPerformance(exercise, {
-                reps: s.reps,
-                durationSeconds: s.duration_seconds,
-                weightKg: s.weight_kg,
-              })}
-              {s.actual_rest_seconds != null ? ` · rest ${formatMmSs(s.actual_rest_seconds)}` : ''}
-            </Text>
-            {prSetIds.has(s.id) ? (
-              <Text size="sm" style={styles.prBadge} testID={`session-detail-pr-${s.id}`}>
-                PR 🏆
-              </Text>
-            ) : null}
-          </View>
+          <PerformedSetRow key={s.id} exercise={exercise} set={s} isPr={prSetIds.has(s.id)} />
         ))
       )}
+    </View>
+  )
+}
+
+// One logged set: its performance line, and — once "Edit" is tapped — the fields to correct it.
+// The reps/duration split is the exercise's `measure`, exactly as it was when the set was logged,
+// and the validation matches the active screen's log-set form so a set can't be edited into a
+// shape that form would have refused to create.
+function PerformedSetRow({
+  exercise,
+  set,
+  isPr,
+}: {
+  exercise: DetailExerciseRow
+  set: DetailSetRow
+  isPr: boolean
+}) {
+  const { db } = usePowerSyncApp()
+  const isHold = exercise.measure === 'duration'
+
+  const [editing, setEditing] = useState(false)
+  const [effort, setEffort] = useState('')
+  const [weight, setWeight] = useState('')
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
+  const [busy, setBusy] = useState(false)
+
+  const handleOpenEdit = useCallback(() => {
+    setEffort(String((isHold ? set.duration_seconds : set.reps) ?? ''))
+    setWeight(String(set.weight_kg))
+    setConfirmingDelete(false)
+    setEditing(true)
+  }, [isHold, set.duration_seconds, set.reps, set.weight_kg])
+
+  const handleSave = useCallback(async () => {
+    const effortNum = Number(effort)
+    if (!Number.isInteger(effortNum) || effortNum <= 0) return
+    // Blank weight means 0 — right for an unweighted bodyweight set, same as when logging one.
+    const weightNum = Number(weight)
+    if (!Number.isFinite(weightNum) || weightNum < 0) return
+
+    setBusy(true)
+    try {
+      await updateSet(db, {
+        setId: set.id,
+        reps: isHold ? null : effortNum,
+        durationSeconds: isHold ? effortNum : null,
+        weightKg: weightNum,
+      })
+      setEditing(false)
+    } finally {
+      setBusy(false)
+    }
+  }, [db, effort, isHold, set.id, weight])
+
+  const handleDelete = useCallback(async () => {
+    setBusy(true)
+    try {
+      await deleteSet(db, { setId: set.id })
+    } finally {
+      setBusy(false)
+    }
+  }, [db, set.id])
+
+  if (editing) {
+    return (
+      <View style={styles.setEditor} testID={`session-detail-set-editor-${set.id}`}>
+        <Text muted size="sm">
+          Set {set.set_index + 1}
+        </Text>
+        <Field
+          label={isHold ? 'Duration (s)' : 'Reps'}
+          value={effort}
+          onChangeText={setEffort}
+          keyboardType="number-pad"
+          testID={`session-detail-set-effort-${set.id}`}
+        />
+        <Field
+          label={exercise.load_type === 'bodyweight' ? 'Added weight (kg)' : 'Weight (kg)'}
+          value={weight}
+          onChangeText={setWeight}
+          keyboardType="decimal-pad"
+          placeholder={exercise.load_type === 'bodyweight' ? '0' : undefined}
+          testID={`session-detail-set-weight-${set.id}`}
+        />
+        <View style={styles.rowButtons}>
+          <Button title="Save" onPress={handleSave} loading={busy} testID={`session-detail-set-save-${set.id}`} />
+          <Button
+            title="Cancel"
+            variant="secondary"
+            onPress={() => {
+              setEditing(false)
+              setConfirmingDelete(false)
+            }}
+            testID={`session-detail-set-cancel-${set.id}`}
+          />
+        </View>
+        {/* Two-step inline confirm rather than a native Alert — deleting a set is not undoable, and
+            an on-screen confirmation stays scriptable in the web build. */}
+        {confirmingDelete ? (
+          <View style={styles.rowButtons}>
+            <Button
+              title="Confirm delete"
+              variant="secondary"
+              onPress={handleDelete}
+              loading={busy}
+              testID={`session-detail-set-delete-confirm-${set.id}`}
+            />
+            <Button
+              title="Keep set"
+              variant="secondary"
+              onPress={() => setConfirmingDelete(false)}
+              testID={`session-detail-set-delete-cancel-${set.id}`}
+            />
+          </View>
+        ) : (
+          <Button
+            title="Delete set"
+            variant="secondary"
+            onPress={() => setConfirmingDelete(true)}
+            testID={`session-detail-set-delete-${set.id}`}
+          />
+        )}
+      </View>
+    )
+  }
+
+  return (
+    <View style={styles.setRow}>
+      <Text muted size="sm" style={styles.setText} testID={`session-detail-set-${set.id}`}>
+        Set {set.set_index + 1}:{' '}
+        {formatSetPerformance(exercise, {
+          reps: set.reps,
+          durationSeconds: set.duration_seconds,
+          weightKg: set.weight_kg,
+        })}
+        {set.actual_rest_seconds != null ? ` · rest ${formatMmSs(set.actual_rest_seconds)}` : ''}
+      </Text>
+      {isPr ? (
+        <Text size="sm" style={styles.prBadge} testID={`session-detail-pr-${set.id}`}>
+          PR 🏆
+        </Text>
+      ) : null}
+      <Button
+        title="Edit"
+        variant="secondary"
+        onPress={handleOpenEdit}
+        testID={`session-detail-set-edit-${set.id}`}
+      />
     </View>
   )
 }
@@ -268,6 +405,16 @@ const styles = StyleSheet.create({
   setRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: spacing.sm,
+  },
+  setText: {
+    flex: 1,
+  },
+  setEditor: {
+    padding: spacing.sm,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.border,
     gap: spacing.sm,
   },
   prBadge: {
