@@ -44,3 +44,11 @@ I built it for myself. It's open source, and if you train the same way, it may h
 - [x] Email + password sign-in, password reset
 
 Running it locally or in production: [docs/development.md](docs/development.md).
+
+## License
+
+Copyright (C) 2026 Hery Nirintsoa.
+
+Workouty is free software licensed under the [GNU Affero General Public License v3.0](LICENSE).
+You may use, study, share, and modify it; if you run a modified version as a network service, you
+have to offer its source to the people using it.
