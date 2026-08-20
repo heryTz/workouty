@@ -121,6 +121,12 @@ WHERE e.id = m.drop_id;
 --
 -- `user_id IS NULL`, as everywhere in this file: a user's custom exercise MAY share a name with a
 -- built-in, and renaming one out from under them would be silent data loss.
+--
+-- A name here is also a foreign key held by the mobile app: apps/mobile/src/session/
+-- exercise-illustrations.ts maps exercise NAMES to movement drawings, because these rows' ids are
+-- gen_random_uuid() and so differ per deployment. Renaming a mapped exercise without updating
+-- that map silently drops its illustration. Its sibling seed test catches a name that leaves this
+-- file entirely, but NOT a rename — both names stay present right here in the VALUES below.
 UPDATE exercises AS e
 SET name = v.new_name,
     updated_at = now()

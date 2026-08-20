@@ -36,6 +36,7 @@ import type { LoadType, Measure } from '@workouty/shared'
 import { useAuth } from '@/auth/useAuth'
 import { usePrSetIds } from '@/dashboard/pr-set-ids-query'
 import { usePowerSyncApp } from '@/powersync/PowerSyncProvider'
+import { ExercisePreviewLink } from '@/session/ExercisePreviewLink'
 import { diffExerciseLists, exerciseListDiverged, type ExerciseListDiff } from '@/session/divergence'
 import { useLastSessionSets } from '@/session/last-time'
 import { playRestBeep } from '@/session/rest-beep'
@@ -697,49 +698,57 @@ function SessionExerciseCard({
       style={[styles.exerciseCard, isCurrent && styles.exerciseCardCurrent]}
       testID={`session-exercise-${sessionExercise.id}`}
     >
-      <Pressable accessibilityRole="button" onPress={onSelect} style={styles.exerciseCardBody}>
-        <Text size="md" style={styles.exerciseName}>
-          {sessionExercise.name}
-        </Text>
-        {sets.length === 0 ? (
-          <Text muted size="sm">
-            No sets yet
+      {/* Row, not nesting: the card body is already a Pressable that makes this exercise the
+          current one, so the preview link sits beside it rather than inside it. */}
+      <View style={styles.exerciseCardTop}>
+        <Pressable accessibilityRole="button" onPress={onSelect} style={styles.exerciseCardBody}>
+          <Text size="md" style={styles.exerciseName}>
+            {sessionExercise.name}
           </Text>
-        ) : (
-          sets.map((s) => (
-            <View key={s.id} style={styles.setRow}>
-              <Text muted size="sm" testID={`set-row-${s.id}`}>
-                Set {s.set_index + 1}:{' '}
-                {formatSetPerformance(sessionExercise, {
-                  reps: s.reps,
-                  durationSeconds: s.duration_seconds,
-                  weightKg: s.weight_kg,
-                })}
-                {s.actual_rest_seconds != null ? ` · rest ${s.actual_rest_seconds}s` : ''}
-              </Text>
-              {prSetIds.has(s.id) ? (
-                <Text size="sm" style={styles.prBadge} testID="pr-badge">
-                  New PR! 🏆
-                </Text>
-              ) : null}
-            </View>
-          ))
-        )}
-
-        {lastSessionSets.length > 0 ? (
-          <View style={styles.lastTimeBlock} testID={`last-time-${sessionExercise.id}`}>
-            <Text size="sm" muted style={styles.lastTimeHeading}>
-              Last time
+          {sets.length === 0 ? (
+            <Text muted size="sm">
+              No sets yet
             </Text>
-            {lastSessionSets.map((ls) => (
-              <Text key={ls.setIndex} size="sm" muted testID={`last-time-set-${sessionExercise.id}-${ls.setIndex}`}>
-                Set {ls.setIndex + 1}: {formatSetPerformance(sessionExercise, ls)}
-                {ls.actualRestSeconds != null ? ` · rest ${formatMmSs(ls.actualRestSeconds)}` : ''}
+          ) : (
+            sets.map((s) => (
+              <View key={s.id} style={styles.setRow}>
+                <Text muted size="sm" testID={`set-row-${s.id}`}>
+                  Set {s.set_index + 1}:{' '}
+                  {formatSetPerformance(sessionExercise, {
+                    reps: s.reps,
+                    durationSeconds: s.duration_seconds,
+                    weightKg: s.weight_kg,
+                  })}
+                  {s.actual_rest_seconds != null ? ` · rest ${s.actual_rest_seconds}s` : ''}
+                </Text>
+                {prSetIds.has(s.id) ? (
+                  <Text size="sm" style={styles.prBadge} testID="pr-badge">
+                    New PR! 🏆
+                  </Text>
+                ) : null}
+              </View>
+            ))
+          )}
+
+          {lastSessionSets.length > 0 ? (
+            <View style={styles.lastTimeBlock} testID={`last-time-${sessionExercise.id}`}>
+              <Text size="sm" muted style={styles.lastTimeHeading}>
+                Last time
               </Text>
-            ))}
-          </View>
-        ) : null}
-      </Pressable>
+              {lastSessionSets.map((ls) => (
+                <Text key={ls.setIndex} size="sm" muted testID={`last-time-set-${sessionExercise.id}-${ls.setIndex}`}>
+                  Set {ls.setIndex + 1}: {formatSetPerformance(sessionExercise, ls)}
+                  {ls.actualRestSeconds != null ? ` · rest ${formatMmSs(ls.actualRestSeconds)}` : ''}
+                </Text>
+              ))}
+            </View>
+          ) : null}
+        </Pressable>
+        <ExercisePreviewLink
+          name={sessionExercise.name}
+          testID={`session-exercise-preview-${sessionExercise.id}`}
+        />
+      </View>
 
       {confirmingRemove ? (
         <View style={styles.rowButtons}>
@@ -790,7 +799,13 @@ const styles = StyleSheet.create({
   exerciseCardCurrent: {
     borderColor: colors.accent,
   },
+  exerciseCardTop: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+  },
   exerciseCardBody: {
+    flex: 1,
     gap: spacing.xs,
   },
   exerciseName: {

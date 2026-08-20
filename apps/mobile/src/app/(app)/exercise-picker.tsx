@@ -27,6 +27,7 @@ import { Pressable, StyleSheet, View } from 'react-native'
 import type { LoadType, Measure } from '@workouty/shared'
 import { useAuth } from '@/auth/useAuth'
 import { usePowerSyncApp } from '@/powersync/PowerSyncProvider'
+import { ExercisePreviewLink } from '@/session/ExercisePreviewLink'
 import { addCustomExercise, useExercises, type ExerciseRow } from '@/session/exercises'
 import { setExerciseRestPref } from '@/session/rest-prefs'
 import { addSessionExercise } from '@/session/session-writes'
@@ -449,19 +450,24 @@ function ExerciseRowView({
           </View>
         </View>
       ) : (
-        <Pressable
-          accessibilityRole="button"
-          onPress={startEditRest}
-          style={styles.restLine}
-          testID={`rest-edit-${exercise.id}`}
-        >
-          <Text muted size="sm">
-            Rest {formatMmSs(exercise.effective_rest_seconds)}
-          </Text>
-          <Text size="sm" style={styles.restEditLink}>
-            Edit
-          </Text>
-        </Pressable>
+        // Siblings, not nested: the rest line is already a Pressable, and putting the preview
+        // link inside it would make one tap mean two things.
+        <View style={styles.metaLine}>
+          <Pressable
+            accessibilityRole="button"
+            onPress={startEditRest}
+            style={styles.restLine}
+            testID={`rest-edit-${exercise.id}`}
+          >
+            <Text muted size="sm">
+              Rest {formatMmSs(exercise.effective_rest_seconds)}
+            </Text>
+            <Text size="sm" style={styles.restEditLink}>
+              Edit
+            </Text>
+          </Pressable>
+          <ExercisePreviewLink name={exercise.name} testID={`exercise-preview-${exercise.id}`} />
+        </View>
       )}
     </View>
   )
@@ -547,7 +553,13 @@ const styles = StyleSheet.create({
   exerciseItem: {
     gap: spacing.xs,
   },
+  metaLine: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingRight: spacing.sm,
+  },
   restLine: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
