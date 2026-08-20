@@ -44,6 +44,10 @@ describe('sessionDetailExercisesSql', () => {
     expect(sql).toMatch(/e\.load_type AS load_type/)
     expect(sql).toMatch(/e\.measure AS measure/)
   })
+
+  it('carries muscle_group, which orders the replacements offered for this exercise', () => {
+    expect(sql).toMatch(/e\.muscle_group AS muscle_group/)
+  })
 })
 
 describe('sessionDetailSetsSql', () => {

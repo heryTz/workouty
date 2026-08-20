@@ -1,5 +1,14 @@
 import { describe, expect, it, vi } from 'vitest'
-import { addSessionExercise, deleteSet, endSession, logSet, recordRest, startSession, updateSet } from './session-writes'
+import {
+  addSessionExercise,
+  changeSessionExercise,
+  deleteSet,
+  endSession,
+  logSet,
+  recordRest,
+  startSession,
+  updateSet,
+} from './session-writes'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
@@ -306,5 +315,47 @@ describe('endSession', () => {
     expect(() => new Date(endedAt as string).toISOString()).not.toThrow()
     expect(() => new Date(updatedAt as string).toISOString()).not.toThrow()
     expect(sessionId).toBe('session-1')
+  })
+})
+
+describe('changeSessionExercise', () => {
+  it('repoints the session_exercises row at the replacement exercise', async () => {
+    const db = mockDb()
+
+    await changeSessionExercise(db, { sessionExerciseId: 'se-1', exerciseId: 'ex-incline-bench' })
+
+    expect(db.execute).toHaveBeenCalledTimes(1)
+    const [sql, params] = db.execute.mock.calls[0] as [string, unknown[]]
+
+    expect(sql).toMatch(/UPDATE session_exercises/)
+    expect(sql).toMatch(/exercise_id\s*=\s*\?/)
+    expect(sql).toMatch(/WHERE id = \?/)
+
+    const [exerciseId, updatedAt, sessionExerciseId] = params
+    expect(exerciseId).toBe('ex-incline-bench')
+    expect(() => new Date(updatedAt as string).toISOString()).not.toThrow()
+    expect(sessionExerciseId).toBe('se-1')
+  })
+
+  it('leaves the logged sets alone — they belong to the session_exercise, not the exercise', async () => {
+    const db = mockDb()
+
+    await changeSessionExercise(db, { sessionExerciseId: 'se-1', exerciseId: 'ex-incline-bench' })
+
+    const [sql] = db.execute.mock.calls[0] as [string, unknown[]]
+    expect(sql).not.toMatch(/\bsets\b/)
+  })
+
+  it('does not interpolate values into the SQL string (uses parameter binding)', async () => {
+    const db = mockDb()
+
+    await changeSessionExercise(db, {
+      sessionExerciseId: "se-1'; DROP TABLE session_exercises; --",
+      exerciseId: 'ex-1',
+    })
+
+    const [sql] = db.execute.mock.calls[0] as [string, unknown[]]
+    expect(sql).not.toMatch(/DROP TABLE/)
+    expect(sql).toMatch(/\?/)
   })
 })
