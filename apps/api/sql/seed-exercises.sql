@@ -1,4 +1,4 @@
--- Built-in exercise library: 74 global rows (user_id IS NULL, is_custom = false), synced to
+-- Built-in exercise library: 76 global rows (user_id IS NULL, is_custom = false), synced to
 -- every authenticated client via the `global_exercises` bucket (see
 -- apps/powersync/sync_rules.yaml). The client can never create these itself — the upload
 -- service forces user_id from the caller's JWT (apps/api/src/sync/upload.service.ts) — so the
@@ -231,6 +231,8 @@ VALUES
   ('Overhand bent-over row (barbell)', 'back', 120, 'external', 'reps', false),
   ('Underhand bent-over row (barbell)', 'back', 120, 'external', 'reps', false),
   ('Single-arm row (dumbbell)', 'back', 90, 'external', 'reps', false),
+  ('Seated row (machine)', 'back', 90, 'external', 'reps', false),
+  ('Seated row (cable)', 'back', 90, 'external', 'reps', false),
   ('Straight-arm pulldown (cable)', 'back', 60, 'external', 'reps', false),
   ('Straight-arm pulldown (dumbbell)', 'back', 60, 'external', 'reps', false),
   ('Pullover (dumbbell)', 'back', 60, 'external', 'reps', false),
