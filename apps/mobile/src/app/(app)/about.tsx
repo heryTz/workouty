@@ -12,6 +12,7 @@ import { appReleaseDate, appVersion, fetchApiMeta, formatReleaseDate, type AppMe
 import { Button, Heading, Screen, Text, colors, radii, spacing } from '@/ui'
 
 const GITHUB_URL = 'https://github.com/heryTz/workouty'
+const ILLUSTRATION_LICENSE_URL = 'https://creativecommons.org/licenses/by-sa/4.0/'
 
 type MetaRowProps = {
   label: string
@@ -74,6 +75,10 @@ export default function About() {
     Linking.openURL(GITHUB_URL).catch(() => {})
   }
 
+  const handleOpenIllustrationLicense = () => {
+    Linking.openURL(ILLUSTRATION_LICENSE_URL).catch(() => {})
+  }
+
   const handleBack = () => {
     if (router.canGoBack()) {
       router.back()
@@ -98,6 +103,23 @@ export default function About() {
       </View>
 
       <Button title="View on GitHub" variant="secondary" onPress={handleOpenGithub} testID="about-github-button" />
+
+      {/* CC BY-SA requires attribution wherever the work is distributed, so this is not optional
+          decoration — see assets/exercises/SOURCE. */}
+      <View style={styles.credits}>
+        <Text muted size="sm">
+          Credits
+        </Text>
+        <Text size="sm" testID="about-illustration-credit">
+          Exercise illustrations by Greg Priday (everkinetic), licensed under CC BY-SA 4.0.
+        </Text>
+        <Button
+          title="View illustration licence"
+          variant="secondary"
+          onPress={handleOpenIllustrationLicense}
+          testID="about-illustration-license-button"
+        />
+      </View>
     </Screen>
   )
 }
@@ -121,6 +143,9 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: spacing.md,
     paddingVertical: spacing.sm,
+  },
+  credits: {
+    gap: spacing.sm,
   },
   rowDivided: {
     borderTopWidth: StyleSheet.hairlineWidth,

@@ -26,6 +26,7 @@ import { Pressable, StyleSheet, View } from 'react-native'
 import { useAuth } from '@/auth/useAuth'
 import { usePrSetIds } from '@/dashboard/pr-set-ids-query'
 import { usePowerSyncApp } from '@/powersync/PowerSyncProvider'
+import { ExercisePreviewLink } from '@/session/ExercisePreviewLink'
 import {
   useSessionDetail,
   type DetailExerciseRow,
@@ -213,9 +214,15 @@ function PerformedExerciseCard({ exercise, sets }: { exercise: DetailExerciseRow
 
   return (
     <View style={styles.exerciseCard} testID={`session-detail-exercise-${exercise.id}`}>
-      <Text size="md" style={styles.exerciseName}>
-        {exercise.name}
-      </Text>
+      <View style={styles.exerciseHeader}>
+        <Text size="md" style={styles.exerciseName}>
+          {exercise.name}
+        </Text>
+        <ExercisePreviewLink
+          name={exercise.name}
+          testID={`session-detail-exercise-preview-${exercise.id}`}
+        />
+      </View>
       {sets.length === 0 ? (
         <Text muted size="sm">
           No sets logged
@@ -491,7 +498,14 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     gap: spacing.xs,
   },
+  exerciseHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+  },
   exerciseName: {
+    flex: 1,
     fontWeight: '700',
   },
   setRow: {

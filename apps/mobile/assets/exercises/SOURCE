@@ -1,0 +1,20 @@
+Exercise illustrations vendored from the everkinetic open data project.
+
+Upstream:  https://github.com/everkinetic/data
+Commit:    446bb9a3d0c3beb6b84f7c9d77dfc8af707a2ab6
+Path:      dist/svg/
+Author:    Greg Priday (everkinetic) — http://everkinetic.com
+License:   Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0)
+           Full text in ./LICENSE
+
+Files are vendored UNMODIFIED and keep their upstream names: <id>-relaxation.svg is the
+start position of the movement, <id>-tension.svg the end. <id> is the zero-padded `id_num`
+from the upstream exercises.json.
+
+Only the subset referenced by src/session/exercise-illustrations.ts is vendored, not the
+full upstream set. To add one, copy both frames from the commit above and add the mapping
+entry — see that file's header for the rule on when a drawing may be mapped.
+
+ShareAlike: any MODIFIED version of these drawings (recoloured, restyled, cropped, or
+converted to another format) is a derivative work and must itself be distributed under
+CC BY-SA 4.0. Attribution is carried on the exercise preview screen and in src/about.
