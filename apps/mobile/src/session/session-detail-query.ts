@@ -28,6 +28,7 @@ export interface DetailExerciseRow {
   exercise_id: string
   position: number
   name: string
+  muscle_group: string
   load_type: LoadType
   measure: Measure
 }
@@ -66,6 +67,7 @@ export function sessionDetailExercisesSql(sessionId: string): { sql: string; par
       se.exercise_id AS exercise_id,
       se.position AS position,
       e.name AS name,
+      e.muscle_group AS muscle_group,
       e.load_type AS load_type,
       e.measure AS measure
     FROM session_exercises se

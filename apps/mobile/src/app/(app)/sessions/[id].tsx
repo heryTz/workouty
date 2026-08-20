@@ -11,13 +11,18 @@
 // Everything else on the screen recomputes itself from the same reactive queries, so an edit or a
 // deletion moves the summary's set count and tonnage without any refresh of our own.
 //
+// An exercise on the card can also be swapped for another logged the same way — see
+// session/exercise-swap.ts for why load_type + measure is the boundary, and
+// changeSessionExercise in session/session-writes.ts for why the logged sets come along
+// untouched.
+//
 // PR badges mean "was a record when you did it", not "still is". markPersonalRecords flags a set
 // that strictly beat every EARLIER set (see packages/shared/src/personal-records.ts), so the
 // badges on an old session read as the history they are, and a later, heavier session doesn't
 // silently un-badge the day you set the record.
 import { useCallback, useState } from 'react'
 import { useLocalSearchParams, useRouter } from 'expo-router'
-import { StyleSheet, View } from 'react-native'
+import { Pressable, StyleSheet, View } from 'react-native'
 import { useAuth } from '@/auth/useAuth'
 import { usePrSetIds } from '@/dashboard/pr-set-ids-query'
 import { usePowerSyncApp } from '@/powersync/PowerSyncProvider'
@@ -35,7 +40,8 @@ import {
   sessionDurationSeconds,
 } from '@/session/session-history'
 import { formatSetPerformance } from '@/session/set-format'
-import { deleteSet, updateSet } from '@/session/session-writes'
+import { useSwapCandidates, type SwapCandidateRow } from '@/session/exercise-swap'
+import { changeSessionExercise, deleteSet, updateSet } from '@/session/session-writes'
 import { createTemplateFromSession } from '@/session/template-writes'
 import { formatMmSs } from '@/session/timers'
 import { Button, Field, Heading, Screen, Text, colors, minTapTarget, radii, spacing } from '@/ui'
@@ -203,6 +209,7 @@ function SessionSummary({
 
 function PerformedExerciseCard({ exercise, sets }: { exercise: DetailExerciseRow; sets: DetailSetRow[] }) {
   const prSetIds = usePrSetIds(exercise.exercise_id)
+  const [swapping, setSwapping] = useState(false)
 
   return (
     <View style={styles.exerciseCard} testID={`session-detail-exercise-${exercise.id}`}>
@@ -218,6 +225,91 @@ function PerformedExerciseCard({ exercise, sets }: { exercise: DetailExerciseRow
           <PerformedSetRow key={s.id} exercise={exercise} set={s} isPr={prSetIds.has(s.id)} />
         ))
       )}
+      {swapping ? (
+        <ExerciseSwapPicker exercise={exercise} onDone={() => setSwapping(false)} />
+      ) : (
+        <Button
+          title="Change exercise"
+          variant="secondary"
+          onPress={() => setSwapping(true)}
+          testID={`session-detail-exercise-swap-${exercise.id}`}
+        />
+      )}
+    </View>
+  )
+}
+
+// The replacement list, expanded in place on the card. Only exercises logged the same way appear
+// (see exercise-swap.ts), so picking one is a rename of what the slot was, never a reinterpretation
+// of the sets under it — which is why it commits on a single tap with no confirmation step.
+function ExerciseSwapPicker({ exercise, onDone }: { exercise: DetailExerciseRow; onDone: () => void }) {
+  const { db } = usePowerSyncApp()
+  const [search, setSearch] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const { candidates, isLoading } = useSwapCandidates({
+    loadType: exercise.load_type,
+    measure: exercise.measure,
+    excludeExerciseId: exercise.exercise_id,
+    muscleGroup: exercise.muscle_group,
+    search,
+  })
+
+  const handlePick = useCallback(
+    async (candidate: SwapCandidateRow) => {
+      setBusy(true)
+      try {
+        await changeSessionExercise(db, { sessionExerciseId: exercise.id, exerciseId: candidate.id })
+        onDone()
+      } finally {
+        setBusy(false)
+      }
+    },
+    [db, exercise.id, onDone],
+  )
+
+  return (
+    <View style={styles.swapPicker} testID={`session-detail-swap-picker-${exercise.id}`}>
+      <Field
+        label="Replace with"
+        placeholder="Search exercises"
+        value={search}
+        onChangeText={setSearch}
+        autoCapitalize="none"
+        testID={`session-detail-swap-search-${exercise.id}`}
+      />
+      {isLoading ? (
+        <Text muted size="sm" testID={`session-detail-swap-loading-${exercise.id}`}>
+          Loading…
+        </Text>
+      ) : candidates.length === 0 ? (
+        <Text muted size="sm" testID={`session-detail-swap-empty-${exercise.id}`}>
+          No other exercise is logged the same way.
+        </Text>
+      ) : (
+        candidates.map((candidate) => (
+          <Pressable
+            key={candidate.id}
+            accessibilityRole="button"
+            disabled={busy}
+            onPress={() => handlePick(candidate)}
+            style={styles.swapRow}
+            testID={`session-detail-swap-option-${exercise.id}-${candidate.id}`}
+          >
+            <Text size="md">{candidate.name}</Text>
+            <Text muted size="sm">
+              {candidate.muscle_group}
+              {candidate.is_custom ? ' · custom' : ''}
+            </Text>
+          </Pressable>
+        ))
+      )}
+      <Button
+        title="Cancel"
+        variant="secondary"
+        onPress={onDone}
+        testID={`session-detail-swap-cancel-${exercise.id}`}
+      />
     </View>
   )
 }
@@ -409,6 +501,23 @@ const styles = StyleSheet.create({
   },
   setText: {
     flex: 1,
+  },
+  swapPicker: {
+    padding: spacing.sm,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    gap: spacing.sm,
+  },
+  swapRow: {
+    minHeight: minTapTarget,
+    justifyContent: 'center',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radii.md,
+    backgroundColor: colors.background,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   setEditor: {
     padding: spacing.sm,

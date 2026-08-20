@@ -98,6 +98,31 @@ export async function addSessionExercise(
   return id
 }
 
+export interface ChangeSessionExerciseInput {
+  sessionExerciseId: string
+  exerciseId: string
+}
+
+// Corrects WHICH exercise a performed slot was — the finished-session screen
+// (app/(app)/sessions/[id].tsx) swaps one through here, for the day you logged flat bench and
+// were actually on the incline.
+//
+// The `sets` rows are deliberately untouched: they hang off the session_exercise, not the
+// exercise, so repointing this one column carries the whole logged history across with no
+// renumbering and no migration. What keeps that safe is the candidate list (exercise-swap.ts),
+// which only ever offers exercises with the same load_type and measure — so reps × kg can't land
+// under a timed hold. Uploads as a PATCH; exercise_id is not server-owned (upload-contracts.ts).
+export async function changeSessionExercise(
+  db: ExecutableDb,
+  { sessionExerciseId, exerciseId }: ChangeSessionExerciseInput,
+): Promise<void> {
+  await db.execute(`UPDATE session_exercises SET exercise_id = ?, updated_at = ? WHERE id = ?`, [
+    exerciseId,
+    nowIso(),
+    sessionExerciseId,
+  ])
+}
+
 export interface LogSetInput {
   userId: string
   sessionExerciseId: string
