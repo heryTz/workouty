@@ -1,9 +1,98 @@
--- Built-in exercise library: 73 global rows (user_id IS NULL, is_custom = false), synced to
+-- Built-in exercise library: 74 global rows (user_id IS NULL, is_custom = false), synced to
 -- every authenticated client via the `global_exercises` bucket (see
 -- apps/powersync/sync_rules.yaml). The client can never create these itself — the upload
 -- service forces user_id from the caller's JWT (apps/api/src/sync/upload.service.ts) — so the
 -- built-in library only ever comes from this server-side seed.
+
+-- MERGE, and it runs before the rename below because it is what makes that rename possible: two
+-- rows have to become one. 'Triceps pushdown (cable)' is the generic row, carrying every set
+-- logged against it since the original 20-row seed; 'Overhand triceps pushdown (cable)' is the
+-- grip-specific row added beside the underhand variant. With both grips spelled out the generic
+-- row is redundant -- an unqualified pushdown IS the overhand one -- so it absorbs the newer row
+-- and then takes its name.
 --
+-- The generic row's id is the one that survives, for the reason the 'Lat pulldown' absorb below
+-- keeps a row rather than deleting it: `exercises.id` is what sets, template rows and rest prefs
+-- all key on, and this is the id with the longer history behind it. The newer row's references
+-- move onto it first, so nothing is left pointing at a row on its way out of the library.
+--
+-- Idempotent through the `keep` join: once the rename below has run, nothing is named 'Triceps
+-- pushdown (cable)' any more, the CTE is empty and every UPDATE here touches zero rows. Without
+-- that guard a re-run would find the RENAMED row under the name it is looking to retire and
+-- soft-delete the library entry it had just produced.
+--
+-- Soft delete, not DELETE -- there are no hard deletes in this project (src/db/columns.ts). It
+-- also frees the name: `exercises_global_name_uq` is partial on `deleted_at IS NULL`, so the
+-- tombstone stops colliding with the rename that follows.
+WITH merged AS (
+  SELECT keep.id AS keep_id, dup.id AS drop_id
+  FROM exercises AS keep
+  JOIN exercises AS dup
+    ON dup.name = 'Overhand triceps pushdown (cable)'
+   AND dup.user_id IS NULL
+   AND dup.deleted_at IS NULL
+  WHERE keep.name = 'Triceps pushdown (cable)'
+    AND keep.user_id IS NULL
+    AND keep.deleted_at IS NULL
+),
+-- Tombstoned children move too, deliberately: they still hold a foreign key to a row leaving the
+-- library, and an undeleted session should not come back pointing at it.
+moved_template_rows AS (
+  UPDATE template_exercises AS t
+  SET exercise_id = m.keep_id,
+      updated_at = now()
+  FROM merged AS m
+  WHERE t.exercise_id = m.drop_id
+),
+moved_session_rows AS (
+  UPDATE session_exercises AS s
+  SET exercise_id = m.keep_id,
+      updated_at = now()
+  FROM merged AS m
+  WHERE s.exercise_id = m.drop_id
+),
+-- `exercise_rest_prefs_user_exercise_uq` allows one live pref per (user, exercise), so a user
+-- holding a pref on BOTH rows cannot have them merged -- moving the second onto keep_id would
+-- violate it. The pref already on the surviving row wins, and the other is tombstoned instead.
+moved_prefs AS (
+  UPDATE exercise_rest_prefs AS p
+  SET exercise_id = m.keep_id,
+      updated_at = now()
+  FROM merged AS m
+  WHERE p.exercise_id = m.drop_id
+    AND p.deleted_at IS NULL
+    AND NOT EXISTS (
+      SELECT 1
+      FROM exercise_rest_prefs AS kept
+      WHERE kept.user_id = p.user_id
+        AND kept.exercise_id = m.keep_id
+        AND kept.deleted_at IS NULL
+    )
+),
+-- Disjoint from `moved_prefs` by construction: both read the same snapshot and their NOT EXISTS /
+-- EXISTS split it in two, so no pref row is written twice within the one statement -- which is
+-- the case Postgres leaves undefined.
+dropped_prefs AS (
+  UPDATE exercise_rest_prefs AS p
+  SET deleted_at = now(),
+      updated_at = now()
+  FROM merged AS m
+  WHERE p.exercise_id = m.drop_id
+    AND p.deleted_at IS NULL
+    AND EXISTS (
+      SELECT 1
+      FROM exercise_rest_prefs AS kept
+      WHERE kept.user_id = p.user_id
+        AND kept.exercise_id = m.keep_id
+        AND kept.deleted_at IS NULL
+    )
+)
+UPDATE exercises AS e
+SET deleted_at = now(),
+    updated_at = now()
+FROM merged AS m
+WHERE e.id = m.drop_id;
+
 -- Renames of built-in rows, and the reason this runs BEFORE the INSERT. A rename cannot be made
 -- by editing a name in the INSERT alone: on an already-seeded database the new name conflicts
 -- with nothing, DO NOTHING never fires, and the seed inserts a SECOND row while the old-named one
@@ -19,6 +108,12 @@
 -- bottom): once renamed, a row no longer matches `e.name = v.old_name`, so a re-run updates zero
 -- rows and ships nothing to PowerSync. No new name here collides with another pair's old name,
 -- so the VALUES order does not matter.
+--
+-- Two pairs DO share a new name -- both historical names of the triceps pushdown row land on
+-- 'Overhand triceps pushdown (cable)' -- which is safe only because their old names cannot
+-- coexist: the pair that retired 'Tricep pushdown' is what created 'Triceps pushdown (cable)'.
+-- Were a database ever to hold both, this statement would try to give two rows one name and
+-- `exercises_global_name_uq` would abort the boot.
 --
 -- The NOT EXISTS guard keeps a half-applied database (old and new name both present, e.g. from a
 -- deploy that ran an older copy of this file) from violating `exercises_global_name_uq` — this
@@ -56,7 +151,12 @@ FROM (VALUES
   ('Calf raise', 'Calf raise (machine)'),
   ('Bicep curl', 'Bicep curl (dumbbell)'),
   ('Hammer curl', 'Hammer curl (dumbbell)'),
-  ('Tricep pushdown', 'Triceps pushdown (cable)')
+  -- Third name for one row, and the same absorb as 'Lat pulldown' above: the generic pushdown
+  -- is redundant now that both grips have rows of their own. 'Tricep pushdown' is what a database
+  -- seeded before the 73-row expansion still calls it, 'Triceps pushdown (cable)' what one seeded
+  -- after it does. The MERGE at the top of this file is what freed the target name.
+  ('Tricep pushdown', 'Overhand triceps pushdown (cable)'),
+  ('Triceps pushdown (cable)', 'Overhand triceps pushdown (cable)')
 ) AS v(old_name, new_name)
 WHERE e.name = v.old_name
   AND e.user_id IS NULL
@@ -149,13 +249,13 @@ VALUES
   ('Romanian deadlift (barbell)', 'legs', 150, 'external', 'reps', false),
   ('Lunge (dumbbell)', 'legs', 90, 'external', 'reps', false),
   ('Leg curl (machine)', 'legs', 90, 'external', 'reps', false),
+  ('Leg extension (machine)', 'legs', 90, 'external', 'reps', false),
   ('Calf raise (machine)', 'legs', 60, 'external', 'reps', false),
   ('Bicep curl (dumbbell)', 'arms', 60, 'external', 'reps', false),
   ('Bicep curl (barbell)', 'arms', 60, 'external', 'reps', false),
   ('Bicep curl (cable)', 'arms', 60, 'external', 'reps', false),
   ('Hammer curl (dumbbell)', 'arms', 60, 'external', 'reps', false),
   ('Hammer curl (cable)', 'arms', 60, 'external', 'reps', false),
-  ('Triceps pushdown (cable)', 'arms', 60, 'external', 'reps', false),
   ('Overhand triceps pushdown (cable)', 'arms', 60, 'external', 'reps', false),
   ('Underhand triceps pushdown (cable)', 'arms', 60, 'external', 'reps', false),
   ('Overhead triceps extension (cable)', 'arms', 60, 'external', 'reps', false),
@@ -170,6 +270,7 @@ VALUES
   ('Hanging leg raise', 'core', 60, 'bodyweight', 'reps', false),
   ('Russian twist', 'core', 60, 'bodyweight', 'reps', false),
   ('Dead bug', 'core', 60, 'bodyweight', 'reps', false),
+  ('Plank shoulder tap', 'core', 60, 'bodyweight', 'reps', false),
   ('Plank', 'core', 60, 'bodyweight', 'duration', false),
   ('Hollow body hold', 'core', 60, 'bodyweight', 'duration', false),
   ('Mountain climbers', 'core', 60, 'bodyweight', 'duration', false),
