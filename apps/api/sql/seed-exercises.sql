@@ -1,4 +1,4 @@
--- Built-in exercise library: 76 global rows (user_id IS NULL, is_custom = false), synced to
+-- Built-in exercise library: 83 global rows (user_id IS NULL, is_custom = false), synced to
 -- every authenticated client via the `global_exercises` bucket (see
 -- apps/powersync/sync_rules.yaml). The client can never create these itself — the upload
 -- service forces user_id from the caller's JWT (apps/api/src/sync/upload.service.ts) — so the
@@ -219,6 +219,10 @@ VALUES
   ('Diamond push-up', 'chest', 60, 'bodyweight', 'reps', false),
   ('Incline push-up', 'chest', 60, 'bodyweight', 'reps', false),
   ('Decline push-up', 'chest', 60, 'bodyweight', 'reps', false),
+  ('Dip', 'chest', 90, 'bodyweight', 'reps', false),
+  ('Mid chest fly (cable)', 'chest', 60, 'external', 'reps', false),
+  ('High-to-low chest fly (cable)', 'chest', 60, 'external', 'reps', false),
+  ('Low-to-high chest fly (cable)', 'chest', 60, 'external', 'reps', false),
   ('Overhead press (barbell)', 'shoulders', 150, 'external', 'reps', false),
   ('Overhead press (dumbbell)', 'shoulders', 120, 'external', 'reps', false),
   ('Overhead press (machine)', 'shoulders', 120, 'external', 'reps', false),
@@ -239,6 +243,9 @@ VALUES
   ('Single-arm row (dumbbell)', 'back', 90, 'external', 'reps', false),
   ('Seated row (machine)', 'back', 90, 'external', 'reps', false),
   ('Seated row (cable)', 'back', 90, 'external', 'reps', false),
+  ('Chest-supported row (dumbbell)', 'back', 90, 'external', 'reps', false),
+  ('Chest-supported row (machine)', 'back', 90, 'external', 'reps', false),
+  ('Chest-supported row (barbell)', 'back', 120, 'external', 'reps', false),
   ('Straight-arm pulldown (cable)', 'back', 60, 'external', 'reps', false),
   ('Straight-arm pulldown (dumbbell)', 'back', 60, 'external', 'reps', false),
   ('Pullover (dumbbell)', 'back', 60, 'external', 'reps', false),

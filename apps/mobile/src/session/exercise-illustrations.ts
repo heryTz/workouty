@@ -9,7 +9,7 @@
 // in seed-exercises.sql silently orphans a drawing — exercise-illustrations-seed.test.ts is the
 // guard, and carries the note on what it can and cannot catch.
 //
-// Deliberately NOT exhaustive: 44 of the 76 built-ins. Everkinetic's naming and coverage do not
+// Deliberately NOT exhaustive: 44 of the 83 built-ins. Everkinetic's naming and coverage do not
 // line up with this library's (it has no plain deadlift-free RDL, no plank, no sit-up, no Russian
 // twist, and its remaining artwork skews to machine variants), so the mapping is hand-authored
 // and every entry was checked against the rendered drawing. Two rules held while authoring it,
