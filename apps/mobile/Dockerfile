@@ -31,7 +31,10 @@ ENV EXPO_PUBLIC_API_URL=${EXPO_PUBLIC_API_URL}
 ENV EXPO_PUBLIC_POWERSYNC_URL=${EXPO_PUBLIC_POWERSYNC_URL}
 ENV EXPO_PUBLIC_APP_VERSION=${EXPO_PUBLIC_APP_VERSION}
 ENV EXPO_PUBLIC_APP_RELEASE_DATE=${EXPO_PUBLIC_APP_RELEASE_DATE}
-RUN pnpm --filter @workouty/mobile exec expo export --platform web --output-dir dist
+# `build` is `expo export` followed by `workbox generateSW workbox-config.js` — the service
+# worker precaches the real exported filenames, so it has to be generated from dist, not
+# alongside it.
+RUN pnpm --filter @workouty/mobile build
 
 
 FROM caddy:2.10-alpine AS runtime

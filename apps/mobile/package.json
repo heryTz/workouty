@@ -47,12 +47,13 @@
     "drizzle-orm": "^0.45.2",
     "pg": "^8.22.0",
     "typescript": "~6.0.3",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.10",
+    "workbox-cli": "^7.4.1"
   },
   "scripts": {
     "postinstall": "powersync-web copy-assets --output public",
     "start": "expo start --port 6102",
-    "build": "expo export --platform web --output-dir dist",
+    "build": "expo export --platform web --output-dir dist && workbox generateSW workbox-config.js",
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web --port 6102",
