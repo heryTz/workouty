@@ -285,8 +285,8 @@ VALUES
   ('Hanging leg raise', 'core', 60, 'bodyweight', 'reps', false),
   ('Russian twist', 'core', 60, 'bodyweight', 'reps', false),
   ('Dead bug', 'core', 60, 'bodyweight', 'reps', false),
-  ('Plank shoulder tap', 'core', 60, 'bodyweight', 'reps', false),
   ('Plank', 'core', 60, 'bodyweight', 'duration', false),
+  ('Plank shoulder tap', 'core', 60, 'bodyweight', 'duration', false),
   ('Hollow body hold', 'core', 60, 'bodyweight', 'duration', false),
   ('Mountain climbers', 'core', 60, 'bodyweight', 'duration', false),
   ('Scissor kicks', 'core', 60, 'bodyweight', 'duration', false)
@@ -294,8 +294,14 @@ ON CONFLICT (name) WHERE user_id IS NULL AND deleted_at IS NULL DO NOTHING;
 
 -- The INSERT above only reaches a FRESH database. `load_type`/`measure` arrived after this seed
 -- first ran (drizzle/0003), so an already-seeded database has all 20 rows sitting at the column
--- defaults ('external', 'reps') and DO NOTHING will never correct them. This backfills the three
+-- defaults ('external', 'reps') and DO NOTHING will never correct them. This backfills the rows
 -- that differ.
+--
+-- It is also the ONLY way to change the measurement of a row that already exists: editing its
+-- tuple in the INSERT above changes nothing on any database that has already been seeded, which
+-- is every deployed one. 'Plank shoulder tap' is here for that reason rather than the historical
+-- one — it seeded as `reps` and is corrected to `duration` here, with the sets already logged
+-- against it converted by the statement that follows.
 --
 -- `user_id IS NULL` is not optional: a user's custom exercise MAY share a name with a built-in
 -- (see the two partial unique indexes in db/schema.ts). Without it this would reach into user
@@ -312,9 +318,48 @@ SET load_type = v.load_type,
 FROM (VALUES
   ('Push-up', 'bodyweight', 'reps'),
   ('Pull-up', 'bodyweight', 'reps'),
-  ('Plank', 'bodyweight', 'duration')
+  ('Plank', 'bodyweight', 'duration'),
+  ('Plank shoulder tap', 'bodyweight', 'duration')
 ) AS v(name, load_type, measure)
 WHERE e.name = v.name
   AND e.user_id IS NULL
   AND e.deleted_at IS NULL
   AND (e.load_type, e.measure) IS DISTINCT FROM (v.load_type, v.measure);
+
+-- Flipping a measure above leaves the sets already logged under the old one behind. A set carries
+-- its measure in whichever of `reps` / `duration_seconds` is populated (db/schema.ts), so every
+-- shoulder tap logged before this change holds a rep count and a NULL duration, while every
+-- reader now asks the exercise for its measure and reads seconds: the app would render all of
+-- that history as "0s" (session/set-format.ts) and drop it out of charts and PR detection,
+-- which filter on the metrics the measurement allows (shared/exercise-measurement.ts).
+--
+-- The conversion is 1 tap ≈ 1 second, the cadence the movement is actually performed at, applied
+-- as a straight copy. It is an approximation and there is no exact one — taps and seconds are not
+-- the same quantity — but it is monotonic in the original number, which is what keeps a user's
+-- history in the same ORDER it was in: their best set stays their best set.
+--
+-- `reps` is deliberately left in place rather than nulled. The CHECK is "at least one of the two"
+-- (`sets_measure_present_ck`), readers select the column the parent's measure names and ignore
+-- the other, and keeping it means the original count survives the approximation — this is the
+-- only record anywhere of what the user actually logged, and a copy that erased it could not be
+-- walked back.
+--
+-- Scoped through the exercise row, so it reaches ONLY sets whose parent is the global library
+-- entry: `user_id IS NULL` on the exercise keeps a user's own same-named custom exercise (and its
+-- sets) untouched, exactly as the UPDATE above does.
+--
+-- Idempotent on `duration_seconds IS NULL`: a converted set has one, so a re-run touches zero
+-- rows and republishes nothing to PowerSync. That same guard makes this self-healing rather than
+-- one-shot — a set uploaded by a client still holding the pre-change library row lands as reps
+-- and is converted on the next container start.
+UPDATE sets AS s
+SET duration_seconds = s.reps,
+    updated_at = now()
+FROM session_exercises AS se
+JOIN exercises AS e ON e.id = se.exercise_id
+WHERE s.session_exercise_id = se.id
+  AND e.name = 'Plank shoulder tap'
+  AND e.user_id IS NULL
+  AND e.measure = 'duration'
+  AND s.duration_seconds IS NULL
+  AND s.reps IS NOT NULL;

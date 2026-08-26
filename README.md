@@ -2,7 +2,7 @@
 
 > 🚧 **Under development.** Usable, but the shape of things is still moving. Expect rough edges.
 
-> 🤖 **Fully vibe-coded.** Every line here was written by an AI agent, and I don't review the code
+> 🚨 **Fully vibe-coded.** Every line here was written by an AI agent, and I don't review the code
 > quality — I check that the app does what I want and move on. No architecture reviews, no
 > refactoring passes, no promises about what's under the hood. I needed this app fast. Read the
 > source with that in mind before you depend on it.
