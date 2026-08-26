@@ -11,6 +11,9 @@ syncs back when there's a connection — so most of the app never waits on the n
   production — see `Dockerfile` and `Caddyfile`.
 - `EXPO_PUBLIC_API_URL` and `EXPO_PUBLIC_POWERSYNC_URL` are inlined at build time, not read at
   runtime.
+- The web build is an installable PWA: `public/manifest.json` plus a Workbox service worker that
+  `pnpm build` generates from the export (`workbox-config.js`). The service worker is only
+  registered in production builds — see the guard in `src/app/+html.tsx`.
 
 ```bash
 pnpm --filter @workouty/mobile start        # dev server on :6102
