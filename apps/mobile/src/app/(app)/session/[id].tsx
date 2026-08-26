@@ -719,7 +719,7 @@ function SessionExerciseCard({
                     durationSeconds: s.duration_seconds,
                     weightKg: s.weight_kg,
                   })}
-                  {s.actual_rest_seconds != null ? ` · rest ${s.actual_rest_seconds}s` : ''}
+                  {s.actual_rest_seconds != null ? ` · rest ${formatMmSs(s.actual_rest_seconds)}` : ''}
                 </Text>
                 {prSetIds.has(s.id) ? (
                   <Text size="sm" style={styles.prBadge} testID="pr-badge">
